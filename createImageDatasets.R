@@ -3,18 +3,9 @@
 # multiple folders to be combined into one training/test set of data
 
 # Note that each image should have an accompanying json file containing the 
-# bounding box coordinates and the keypoint location of the stomata centre:
+# keypoint location of the stomata centre:
 
-# {"bboxes":[[1109, 232, 1218, 316], 
-# [762, 543, 893, 606], 
-# [524, 80, 654, 150], 
-# [492, 185, 601, 288], 
-# [380, 165, 434, 302], 
-# [1131, 600, 1249, 682], 
-# [123, 527, 228, 628], 
-# [608, 596, 744, 651], 
-# [154, 156, 277, 230]], 
-# "keypoints":[[[1217, 315, 1]], 
+# {"keypoints":[[[1217, 315, 1]], 
 # [[762, 567, 1]], 
 # [[524, 132, 1]], 
 # [[601, 191, 1]], 
@@ -25,18 +16,43 @@
 # [[278, 175, 1]]
 # ]} 
 
-
 library(fs)
+
+# Create a json keypoints file from ImageJ manually saved coordinates
+make.json <- function(in.file){
+  data <- read.csv(in.file)
+  data$X <- round(data$X) # correct half pixels
+  data$Y <- round(data$Y)
+
+  outstring.start <- "{\"keypoints\":["
+  outstring.end <- "]}"
+  outstring.mid <- paste(paste0("[[", data$X, ",", data$Y, ",1]]"), collapse=",")
+
+  out.file <- gsub("csv", "json", in.file)
+  if(file.exists(out.file)) fs::file_delete(out.file)
+  
+  file.conn <- file(out.file)
+  writeLines( paste0(outstring.start, outstring.mid, outstring.end), file.conn)
+  close(file.conn)
+}
 
 # Create a new output folder based on the input folder name
 # The input folder will contain all the annotated images, possibly in subfolders
 in.folder = commandArgs(trailingOnly=T)[1]
+if(is.na(in.folder)) stop("Must provide an input directory")
+
+# Delete any previous training folders
 out.folder = paste0(in.folder, "_trainable")
 if(dir.exists(out.folder)) fs::file_delete(out.folder)
 dir.create(out.folder)
 
 # Randomly order the image files and get the corresponding annotation file names
-files = sample(list.files(in.folder, full.names = T, pattern = ".tiff", recursive = T))
+files = sample(list.files(in.folder, full.names = T, pattern = ".jpg", recursive = T))
+
+# Convert csv with manual annotations of keypoints into json format
+annot.csv = list.files(in.folder, full.names = T, pattern = ".csv", recursive = T)
+sapply(annot.csv, make.json)
+
 annots = list.files(in.folder, full.names = T, pattern = ".json", recursive = T)
 
 # Split training and test images 80-20
