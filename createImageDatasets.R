@@ -26,7 +26,7 @@ make.json <- function(in.file){
 
   outstring.start <- "{\"keypoints\":["
   outstring.end <- "]}"
-  outstring.mid <- paste(paste0("[[", data$X, ",", data$Y, ",1]]"), collapse=",")
+  outstring.mid <- paste(paste0("[", data$X, ",", data$Y, ",1]"), collapse=",")
 
   out.file <- gsub("csv", "json", in.file)
   if(file.exists(out.file)) fs::file_delete(out.file)
@@ -71,16 +71,17 @@ fs::dir_create(c(test_image_folder, test_annot_folder,
   train_image_folder, train_annot_folder,
   weights_folder), recurse = T)
 
-# Prepare each test image and annotation file
-for(file in test){
+
+# Move images and annotation files into correct folders
+create.files <- function(file, image_folder, annot_folder){
   # new.name = folder name + file name
   paths       = fs::path_split(fs::path_rel(file, in.folder))
   folder_name =  paths[[1]][1]
   image_name  = paths[[1]][length(paths[[1]])]
   base        = fs::path_ext_remove(image_name)
   
-  new.image.path = paste0(test_image_folder, "/", folder_name, "_",base, ".tiff" ) 
-  new.annot.path = paste0(test_annot_folder, "/", folder_name, "_",base, ".json" )
+  new.image.path = paste0(image_folder, "/", folder_name, "_",base, ".jpg" ) 
+  new.annot.path = paste0(annot_folder, "/", folder_name, "_",base, ".json" )
 
   annot.file = fs::path_filter(annots, glob = paste0("*", folder_name, "*", base, ".json"))
 
@@ -90,26 +91,54 @@ for(file in test){
     fs::file_copy(file, new.image.path, overwrite=T)
     fs::file_copy(annot.file, new.annot.path, overwrite=T)
   }
-
 }
+
+# Prepare each test image and annotation file
+sapply(test, create.files, image_folder = test_image_folder, annot_folder=test_annot_folder)
 
 # Prepare each training image and annotation file
-for(file in train){
-  # new.name = folder name + file name
-  paths       = fs::path_split(fs::path_rel(file, in.folder))
-  folder_name =  paths[[1]][1]
-  image_name  = paths[[1]][length(paths[[1]])]
-  base        = fs::path_ext_remove(image_name)
-  
-  new.image.path = paste0(train_image_folder, "/", folder_name, "_",base, ".tiff" ) 
-  new.annot.path = paste0(train_annot_folder, "/", folder_name, "_",base, ".json" )
+sapply(train, create.files, image_folder = train_image_folder, annot_folder=train_annot_folder)
 
-  annot.file = fs::path_filter(annots, glob = paste0("*", folder_name, "*", base, ".json"))
+
+# # Prepare each test image and annotation file
+# for(file in test){
+#   # new.name = folder name + file name
+#   paths       = fs::path_split(fs::path_rel(file, in.folder))
+#   folder_name =  paths[[1]][1]
+#   image_name  = paths[[1]][length(paths[[1]])]
+#   base        = fs::path_ext_remove(image_name)
+  
+#   new.image.path = paste0(test_image_folder, "/", folder_name, "_",base, ".jpg" ) 
+#   new.annot.path = paste0(test_annot_folder, "/", folder_name, "_",base, ".json" )
+
+#   annot.file = fs::path_filter(annots, glob = paste0("*", folder_name, "*", base, ".json"))
 
   
-  # Exported annotations may not contain nuclei in an image - skip these
-  if(length(annot.file)==length(new.image.path)){
-    fs::file_copy(file, new.image.path, overwrite=T)
-    fs::file_copy(annot.file, new.annot.path, overwrite=T)
-  }
-}
+#   # Exported annotations may not contain nuclei in an image - skip these
+#   if(length(annot.file)==length(new.image.path)){
+#     fs::file_copy(file, new.image.path, overwrite=T)
+#     fs::file_copy(annot.file, new.annot.path, overwrite=T)
+#   }
+
+# }
+
+# # Prepare each training image and annotation file
+# for(file in train){
+#   # new.name = folder name + file name
+#   paths       = fs::path_split(fs::path_rel(file, in.folder))
+#   folder_name =  paths[[1]][1]
+#   image_name  = paths[[1]][length(paths[[1]])]
+#   base        = fs::path_ext_remove(image_name)
+  
+#   new.image.path = paste0(train_image_folder, "/", folder_name, "_",base, ".jpg" ) 
+#   new.annot.path = paste0(train_annot_folder, "/", folder_name, "_",base, ".json" )
+
+#   annot.file = fs::path_filter(annots, glob = paste0("*", folder_name, "*", base, ".json"))
+
+  
+#   # Exported annotations may not contain nuclei in an image - skip these
+#   if(length(annot.file)==length(new.image.path)){
+#     fs::file_copy(file, new.image.path, overwrite=T)
+#     fs::file_copy(annot.file, new.annot.path, overwrite=T)
+#   }
+# }
