@@ -19,7 +19,7 @@ from engine import train_one_epoch, evaluate
 matplotlib.use('TkAgg') # ensure plot window can spawn
 
 MODEL_NAME = 'keypointsrcnn_weights_3.pth'
-data_path = './stomatal_images_trainable'
+data_path = './stomatal_image_trainable'
 KEYPOINTS_FOLDER_TRAIN = os.path.join(data_path, 'train')
 KEYPOINTS_FOLDER_TEST = os.path.join(data_path, 'test')
 
