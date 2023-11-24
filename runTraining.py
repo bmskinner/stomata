@@ -73,7 +73,7 @@ class ClassDataset(Dataset):
 			# [[obj1_kp1, obj1_kp2], [obj2_kp1, obj2_kp2], [obj3_kp1, obj3_kp2]], where each keypoint is in [x, y]-format            
 			# Then we need to convert it to the following list:
 			# [obj1_kp1, obj1_kp2, obj2_kp1, obj2_kp2, obj3_kp1, obj3_kp2]
-			keypoints_original_flattened = [el[0:2] for kp in keypoints_original for el in kp]
+			keypoints_original_flattened = [kp[0:2] for kp in keypoints_original]
 
 			# print(keypoints_original)
 			# print("")
@@ -89,10 +89,10 @@ class ClassDataset(Dataset):
 			# For example, if we have the following list of keypoints for three objects (each object has two keypoints):
 			# [obj1_kp1, obj1_kp2, obj2_kp1, obj2_kp2, obj3_kp1, obj3_kp2], where each keypoint is in [x, y]-format
 			# Then we need to convert it to the following list:
-			# [[obj1_kp1], [obj2_kp1], [obj3_kp1]]
+			# [obj1_kp1, obj2_kp1, obj3_kp1]
 			# keypoints_transformed_unflattened = np.reshape(np.array(transformed['keypoints']), (1,2,2)).tolist()
 			# keypoints_transformed_unflattened = np.reshape(np.array(transformed['keypoints']), (-1,2,2)).tolist()
-
+			keypoints_transformed = np.array(transformed['keypoints'])
 			# print("")
 			# print(keypoints_transformed_unflattened)
 			# keypoints_transformed_unflattened = np.array(transformed['keypoints'])
@@ -106,6 +106,11 @@ class ClassDataset(Dataset):
 			# 		# keypoints_original[o_idx][k_idx][2] - original visibility of keypoint
 			# 		obj_keypoints.append(kp + [keypoints_original[o_idx][k_idx][2]])
 			# 	keypoints.append(obj_keypoints)
+
+
+			keypoints = []
+			for o_idx, kp in enumerate(keypoints_transformed): # Iterating over objects
+				keypoints.append(kp+ [keypoints_original[o_idx][2]])
 		
 		else:
 			img, keypoints = img_original, keypoints_original        
