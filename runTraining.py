@@ -68,49 +68,20 @@ class ClassDataset(Dataset):
 
 		if self.transform:   
 			img, keypoints = img_original, keypoints_original   
-			# Converting keypoints from [x,y,visibility]-format to [x, y]-format + Flattening nested list of keypoints            
-			# For example, if we have the following list of keypoints for three objects (each object has two keypoints):
-			# [[obj1_kp1, obj1_kp2], [obj2_kp1, obj2_kp2], [obj3_kp1, obj3_kp2]], where each keypoint is in [x, y]-format            
-			# Then we need to convert it to the following list:
-			# [obj1_kp1, obj1_kp2, obj2_kp1, obj2_kp2, obj3_kp1, obj3_kp2]
+			# Converting keypoints from [x,y,visibility]-format to [x, y]-format     
 			keypoints_original_flattened = [kp[0:2] for kp in keypoints_original]
-
-			# print(keypoints_original)
-			# print("")
-			# print(keypoints_original_flattened)
 			
 			# Apply augmentations
 			transformed = self.transform(image=img_original, keypoints=keypoints_original_flattened)
 			img = transformed['image']
 
-			# print(np.array(transformed['keypoints']))
-			
-			# Unflattening list transformed['keypoints']
-			# For example, if we have the following list of keypoints for three objects (each object has two keypoints):
-			# [obj1_kp1, obj1_kp2, obj2_kp1, obj2_kp2, obj3_kp1, obj3_kp2], where each keypoint is in [x, y]-format
-			# Then we need to convert it to the following list:
-			# [obj1_kp1, obj2_kp1, obj3_kp1]
-			# keypoints_transformed_unflattened = np.reshape(np.array(transformed['keypoints']), (1,2,2)).tolist()
-			# keypoints_transformed_unflattened = np.reshape(np.array(transformed['keypoints']), (-1,2,2)).tolist()
 			keypoints_transformed = np.array(transformed['keypoints'])
-			# print("")
-			# print(keypoints_transformed_unflattened)
-			# keypoints_transformed_unflattened = np.array(transformed['keypoints'])
 
-			# Converting transformed keypoints from [x, y]-format to [x,y,visibility]-format by appending original visibilities to transformed coordinates of keypoints
-			# keypoints = []
-			# for o_idx, obj in enumerate(keypoints_transformed_unflattened): # Iterating over objects
-			# 	obj_keypoints = []
-			# 	for k_idx, kp in enumerate(obj): # Iterating over keypoints in each object
-			# 		# kp - coordinates of keypoint
-			# 		# keypoints_original[o_idx][k_idx][2] - original visibility of keypoint
-			# 		obj_keypoints.append(kp + [keypoints_original[o_idx][k_idx][2]])
-			# 	keypoints.append(obj_keypoints)
-
-
+			# Convert transformed keypoints from [x, y]-format to [x,y,visibility]-format by appending original visibilities
+			# to transformed coordinates of keypoints
 			keypoints = []
-			for o_idx, kp in enumerate(keypoints_transformed): # Iterating over objects
-				keypoints.append(kp+ [keypoints_original[o_idx][2]])
+			for kp_idx, kp in enumerate(keypoints_transformed): # Iterating over objects
+				keypoints.append(kp+[keypoints_original[kp_idx][2]])
 		
 		else:
 			img, keypoints = img_original, keypoints_original        
