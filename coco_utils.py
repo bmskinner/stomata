@@ -55,12 +55,12 @@ class ConvertCocoPolysToMask:
 
         anno = [obj for obj in anno if obj["iscrowd"] == 0]
 
-        boxes = [obj["bbox"] for obj in anno]
-        # guard against no boxes via resizing
-        boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
-        boxes[:, 2:] += boxes[:, :2]
-        boxes[:, 0::2].clamp_(min=0, max=w)
-        boxes[:, 1::2].clamp_(min=0, max=h)
+        # boxes = [obj["bbox"] for obj in anno]
+        # # guard against no boxes via resizing
+        # boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+        # boxes[:, 2:] += boxes[:, :2]
+        # boxes[:, 0::2].clamp_(min=0, max=w)
+        # boxes[:, 1::2].clamp_(min=0, max=h)
 
         classes = [obj["category_id"] for obj in anno]
         classes = torch.tensor(classes, dtype=torch.int64)
@@ -76,15 +76,14 @@ class ConvertCocoPolysToMask:
             if num_keypoints:
                 keypoints = keypoints.view(num_keypoints, -1, 3)
 
-        keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
-        boxes = boxes[keep]
-        classes = classes[keep]
-        masks = masks[keep]
-        if keypoints is not None:
-            keypoints = keypoints[keep]
+        # keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+        # boxes = boxes[keep]
+        # classes = classes[keep]
+        # masks = masks[keep]
+        # if keypoints is not None:
+        #     keypoints = keypoints[keep]
 
         target = {}
-        target["boxes"] = boxes
         target["labels"] = classes
         target["masks"] = masks
         target["image_id"] = image_id
@@ -114,8 +113,8 @@ def _coco_remove_images_without_annotations(dataset, cat_list=None):
         if len(anno) == 0:
             return False
         # if all boxes have close to zero area, there is no annotation
-        if _has_only_empty_bbox(anno):
-            return False
+        # if _has_only_empty_bbox(anno):
+        #     return False
         # keypoints task have a slight different critera for considering
         # if an annotation is valid
         if "keypoints" not in anno[0]:
@@ -156,9 +155,9 @@ def convert_to_coco_api(ds):
         img_dict["height"] = img.shape[-2]
         img_dict["width"] = img.shape[-1]
         dataset["images"].append(img_dict)
-        bboxes = targets["boxes"]
-        bboxes[:, 2:] -= bboxes[:, :2]
-        bboxes = bboxes.tolist()
+        # bboxes = targets["boxes"]
+        # bboxes[:, 2:] -= bboxes[:, :2]
+        # bboxes = bboxes.tolist()
         labels = targets["labels"].tolist()
         areas = targets["area"].tolist()
         iscrowd = targets["iscrowd"].tolist()
@@ -169,11 +168,11 @@ def convert_to_coco_api(ds):
         if "keypoints" in targets:
             keypoints = targets["keypoints"]
             keypoints = keypoints.reshape(keypoints.shape[0], -1).tolist()
-        num_objs = len(bboxes)
+        num_objs = len(keypoints)
         for i in range(num_objs):
             ann = {}
             ann["image_id"] = image_id
-            ann["bbox"] = bboxes[i]
+            # ann["bbox"] = bboxes[i]
             ann["category_id"] = labels[i]
             categories.add(labels[i])
             ann["area"] = areas[i]
