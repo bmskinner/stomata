@@ -2,7 +2,7 @@
 library(tidyverse)
 library(magrittr)
 
-MAX.DISTANCE <- 200
+MAX.DISTANCE <- 300
 
 files <- list.files(path = "stomatal_images", pattern = "*.csv",  recursive = T, full.names = T)
 
@@ -44,6 +44,31 @@ absolute.angle <- function(x1, y1, x2, y2, x3, y3){
 
   return(angle)
 }
+
+# Merge to find nearest points
+mge <- merge(filt, filt, by.x = "Comparator", by.y = "stomata", all.y = F) %>%
+  dplyr::filter(value.x <= MAX.DISTANCE & value.x > 0) %>%
+  merge(., filt, by.x = "Comparator.y", by.y = "stomata", all.y = F) %>%
+  dplyr::filter(value.y <= MAX.DISTANCE & value.y > 0) %>%
+  dplyr::select(-Comparator.y.y, -value) %>%
+  dplyr::distinct()
+
+mge$theta <- mapply(absolute.angle, mge$X.x, mge$Y.x, mge$X.y, mge$Y.y, mge$X, mge$Y)
+mge %<>% dplyr::filter( (theta > 175 & theta < 185) |  (theta < -175 & theta > -185))
+
+# What are the points? Check order
+ggplot(mge)+
+  geom_point(aes(x = X, y = Y))+
+  geom_point(aes(x = X.x, y = Y.x))+
+  geom_point(aes(x = X.y, y = Y.y))+
+  geom_segment(aes(x = X.x, y = Y.x, xend = X.y, yend = Y.y))+
+  geom_segment(aes(x = X.y, y = Y.y, xend = X, yend = Y))+
+  facet_wrap(~stomata)
+
+
+# The raw points
+ggplot(filt, aes(x = X, y = Y)) +
+  geom_point()
 
 chains <- list()
 for(i in unique(filt$stomata)){
