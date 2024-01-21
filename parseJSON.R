@@ -165,8 +165,10 @@ process.json.file <- function(file){
     dplyr::select(S1 = Var1, S1.x = x.com, S1.y = y.com, S2 = Var2) %>% # rename for clarity
     merge(., coms[,1:3], by.x = "S2", by.y = "stomata", all.y = F) %>% # add coordinates for S1
     dplyr::select(S1, S1.x, S1.y, S2, S2.x = x.com, S2.y = y.com) %>% # rename for clarity
+    dplyr::rowwise() %>%
     dplyr::mutate(S1S2 = euclidean(S1.x, S1.y, S2.x, S2.y),
-                  kmer = paste0(S1, S2)) %>%
+                  kmer = paste0(S1, S2),
+                  abs.angle = LearnGeom::Angle(c(S1.x, S1.y+10), c(S1.x,  S1.y),  c(S2.x,S2.y))) %>% # angle of 2mer relative to image
     dplyr::filter(S1 != S2, S1S2 < TRIM.DISTANCE)
   
   # Join the tables to create a 3-mer chain
@@ -175,10 +177,25 @@ process.json.file <- function(file){
     dplyr::select(S1, S1.x, S1.y, S2, S2.x, S2.y, S3 = S2B, S3.x = S2.xB, 
                   S3.y = S2.yB, S1S2 = S1S2A, S2S3 = S1S2B) %>% # rename for clarity
     dplyr::rowwise() %>%
-    dplyr::mutate(angle = LearnGeom::Angle(c(S1.x,  S1.y), c(S2.x, S2.y), c(S3.x,S3.y))) %>% # calculate angles
+    dplyr::mutate(angle = LearnGeom::Angle(c(S1.x,  S1.y), c(S2.x, S2.y), c(S3.x,S3.y)),
+                  abs.angle = LearnGeom::Angle(c(S1.x, S1.y+10), c(S1.x,  S1.y),  c(S2.x,S2.y))) %>% 
     dplyr::filter( angle > 180 - ANGLE.DELTA)  %>% # rename for clarity
     dplyr::mutate(merL = paste0(S1, S2),
                   merR = paste0(S2, S3))
+  
+  # Check the distrinbution of 2mer angles in mer3 vs mer2
+  ggplot(mer3, aes(x = abs.angle))+
+    geom_density()
+  
+  # Crete density and find max value
+  find.mode <-  function(x) {
+    d <- density(x)
+    d$x[which.max(d$y)]
+  }
+  
+  # Filter the 2mers to those in a reasonable range
+  modal.angle <- find.mode(mer3$abs.angle)
+  mer3 %<>% dplyr::filter(abs.angle >= modal.angle - 5 & abs.angle <= modal.angle+5)
   
   
   mer.3.plot <- plot.3mers(mer3, img, border.data)
