@@ -13,9 +13,12 @@ library(ggbeeswarm)
 library(filesstrings)
 library(autoimage)
 library(sf)
+library(patchwork)
+# min and maximum distance between stomata
+MIN.DISTANCE <- 100
+MAX.DISTANCE <- 500
 
-# MAX.DISTANCE <- 300
-TRIM.DISTANCE <- 500
+# Max angle difference from 180 degrees
 ANGLE.DELTA <- 15
 
 # Calculate centre of mass from JSON
@@ -41,6 +44,7 @@ get.border <- function(file){
     as.data.frame 
 }
 
+# Create 1mers from stomata outlines
 create.1mers <- function(border.data){
   data <- border.data %>%
     dplyr::group_by(shape, file) %>%
@@ -70,6 +74,7 @@ find.mode <-  function(x) {
   d$x[which.max(d$y)]
 }
 
+# create a deBruijn graph from kmers
 create.debruijn.graph <- function(mer.data){
   uks <- unique(c(mer.data$merL, mer.data$merR)) # unique 2mers
   if(length(uks)==0)
@@ -92,6 +97,7 @@ create.debruijn.graph <- function(mer.data){
   g
 }
 
+# create contigs from kmers
 create.contigs <- function(mer.data){
   if(nrow(mer.data)==0) return(mer.data %>% dplyr::mutate(Contig = list()))
  
@@ -119,27 +125,10 @@ create.contigs <- function(mer.data){
     dplyr::mutate(Contig = map_int(merL, function(x) contig.numbers[names(contig.numbers)==x]))
 }
 
-plot.contigs <- function(mer.contigs, img, border.data){
-  img.grob <- rasterGrob(img, interpolate=TRUE)
-  # visualise the contigs
-  ggplot(mer.contigs)+
-    annotation_custom(img.grob, xmin=0, xmax=dim(img)[2], ymin=0, ymax=dim(img)[1]) +
-    coord_fixed(xlim = c(0, dim(img)[2]), ylim = c(0, dim(img)[1]))+
-    geom_polygon(data = border.data, aes(x = x, y = y, group=shape), fill = "darkgreen", alpha=0.6)+
-    geom_point(aes(x = S1.x, y = S1.y, col = as.factor(Contig)), size=2)+
-    geom_point(aes(x = S2.x, y = S2.y, col = as.factor(Contig)), size=2)+
-    geom_point(aes(x = S3.x, y = S3.y, col = as.factor(Contig)), size=2)+
-    geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, col = as.factor(Contig)), linewidth=1) +
-    geom_segment(aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y, col = as.factor(Contig)), linewidth=1) +
-    labs(col = "Chain")+
-    theme_bw()+
-    theme(axis.title = element_blank())
-}
-
 # From a table of centres of mass, create 2mers
 # filter to those within a given distance of each other
 # and annotate with absolute angles on image
-create.2mers <- function(coms, min.distance = 100, max.distance = 300){
+create.2mers <- function(coms, min.distance, max.distance){
   data <- expand.grid(coms$stomata, coms$stomata, stringsAsFactors = F) %>%
 
     dplyr::distinct() %>% # remove duplicates
@@ -212,7 +201,13 @@ process.json.file <- function(file){
       geom_text(aes(x = S1.x, y = S1.y, label = S1), col = "pink1", size = 2)+
       geom_text(aes(x = S2.x, y = S2.y, label = S2), col = "pink1", size = 2)+
       theme_bw()+
-      theme(axis.title = element_blank())
+      theme(axis.title = element_blank(),
+            axis.text = element_blank(), 
+            axis.line = element_blank(),
+            axis.ticks = element_blank(),
+            panel.grid = element_blank(),
+            panel.border = element_blank()
+            )
   }
   
   plot.3mers <- function(mer.data){
@@ -234,7 +229,37 @@ process.json.file <- function(file){
       geom_text(aes(x = S2.x, y = S2.y, label = S2), col = "pink1", size = 2)+
       geom_text(aes(x = S3.x, y = S3.y, label = S3), col = "pink1", size = 2)+
       theme_bw()+
-      theme(axis.title = element_blank())
+      theme(axis.title = element_blank(),
+            axis.text = element_blank(), 
+            axis.line = element_blank(),
+            axis.ticks = element_blank(),
+            panel.grid = element_blank(),
+            panel.border = element_blank()
+      )
+  }
+  
+  # plot contig data
+  plot.contigs <- function(mer.contigs){
+    img.grob <- rasterGrob(img, interpolate=TRUE)
+    # visualise the contigs
+    ggplot(mer.contigs)+
+      annotation_custom(img.grob, xmin=0, xmax=dim(img)[2], ymin=0, ymax=dim(img)[1]) +
+      coord_fixed(xlim = c(0, dim(img)[2]), ylim = c(0, dim(img)[1]))+
+      geom_polygon(data = border.data, aes(x = x, y = y, group=shape), fill = "darkgreen", alpha=0.6)+
+      geom_point(aes(x = S1.x, y = S1.y, col = as.factor(Contig)), size=2)+
+      geom_point(aes(x = S2.x, y = S2.y, col = as.factor(Contig)), size=2)+
+      geom_point(aes(x = S3.x, y = S3.y, col = as.factor(Contig)), size=2)+
+      geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, col = as.factor(Contig)), linewidth=1) +
+      geom_segment(aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y, col = as.factor(Contig)), linewidth=1) +
+      labs(col = "Chain")+
+      theme_bw()+
+      theme(axis.title = element_blank(),
+            axis.text = element_blank(), 
+            axis.line = element_blank(),
+            axis.ticks = element_blank(),
+            panel.grid = element_blank(),
+            panel.border = element_blank()
+      )
   }
   
   save.plot <- function(plot, filename){
@@ -247,7 +272,7 @@ process.json.file <- function(file){
   # Create distance table between pairs of stomata
   # Filter to only those within a given distance
   cat("  Calculating distances\n")
-  mer2 <- create.2mers(mer1, min.distance = 100, max.distance = TRIM.DISTANCE)
+  mer2 <- create.2mers(mer1, min.distance = MIN.DISTANCE, max.distance = MAX.DISTANCE)
   mer.2.plot <- plot.2mers(mer2)
   save.plot(mer.2.plot, ".mer2.raw.png")
   
@@ -278,7 +303,7 @@ process.json.file <- function(file){
   
   # Find the 3mers in straight lines
   mer3.straight <- mer3 %>% dplyr::filter( angle > 180 - ANGLE.DELTA)
-  # mer.3.straight.plot <- save.plot(plot.3mers(mer3.straight), ".mer3.straight.png")
+  mer.3.straight.plot <- save.plot(plot.3mers(mer3.straight), ".mer3.straight.png")
   
   # Filter the straight 3mers to the most common orientation in the image
   modal.angle <- find.mode(mer3.straight$abs.angle)
@@ -347,7 +372,7 @@ process.json.file <- function(file){
     na.omit
   
   
-  mer.3.pruned.plot <- save.plot(plot.3mers(mer3.terminal), ".mer3.pruned.png")
+  # mer.3.pruned.plot <- save.plot(plot.3mers(mer3.terminal), ".mer3.pruned.png")
   
   # Check the distribution of angles in mer3 vs mer2
   # density.plot <- ggplot()+
@@ -368,7 +393,7 @@ process.json.file <- function(file){
   short.contigs <- create.contigs(mer3.terminal) %>% 
     dplyr::group_by(Contig)
 
-  chain.plot <- save.plot(plot.contigs(short.contigs, img, border.data), ".chains.png")
+  chain.plot <- save.plot(plot.contigs(short.contigs), ".chains.png")
 
   # Match contigs to the 2mers they contain
   contig.assignment <- short.contigs %>% dplyr::select(Contig, merL, merR) %>%
@@ -432,10 +457,15 @@ process.json.file <- function(file){
   dist.contigs$fUnassignedStomata <- length(remainder.stomata)/length(unique(mer1$stomata))
   
   rotated.plot <- ggplot(dist.contigs)+
-    geom_segment(aes(x = Contig.start.x, y = Contig.start.y, xend = RotatedContigEnd[,1], yend = RotatedContigEnd[,2]), col = "black")+
-    geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), col = "grey")+
+    geom_segment(aes(x = Contig.start.x, y = Contig.start.y, xend = RotatedContigEnd[,1], yend = RotatedContigEnd[,2]), col = "grey20")+
+    # geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), col = "grey")+
     geom_segment(aes(x = RotatedS1[,1], y = RotatedS1[,2], xend = RotatedS2[,1], yend = RotatedS2[,2]), col = "blue")+
-    theme_bw()
+    geom_point(aes(x = RotatedS1[,1], y = RotatedS1[,2]), col="blue", size=2)+
+    geom_point(aes(x = RotatedS2[,1], y = RotatedS2[,2]), col="blue", size=2)+
+    theme_bw()+
+    theme(axis.title = element_blank(),
+          panel.grid = element_blank(),
+          axis.ticks = element_blank())
   
   ggsave(str_replace(file, ".json", ".chain.rotated.png"), plot = rotated.plot, dpi = 300, units = "mm", width = 170, height = 140)
   return(dist.contigs)
@@ -458,6 +488,7 @@ dist.plot <- ggplot(chain.distances, aes(x=Folder, y = S1S2))+
   labs(y = "Distance between stomata pairs (pixels)")+
   theme_bw()+
   theme(axis.text.x = element_blank())
+# ggsave("Distance_plot.png", plot = dist.plot, dpi = 300, units = "mm", width = 85, height = 85)
 
 # Look at deviances in each contig
 deviance.data <- chain.distances %>%
@@ -472,28 +503,41 @@ deviance.data <- chain.distances %>%
                     SumDeviance = sum(Deviance),
                     SumAbsDeviance = sum(abs(Deviance)),
                     MeanDeviance = SumDeviance/nStomata,
+                    MeanAbsDeviance = SumAbsDeviance / nStomata,
                     RootSumSqareDeviance = sqrt( sum(Deviance^2)),
                     RootMeanSquareDeviance = sqrt( sum(Deviance^2)/nStomata  )
   )
 
 # Overall levels of deviance from straight line in contig
-ggplot(deviance.data, aes(x = File, y = SumDeviance/nStomata))+
+deviance.plot <- ggplot(deviance.data, aes(x = File, y = MeanDeviance, col=Folder))+
   geom_hline(yintercept = 0)+
   geom_beeswarm()+
   geom_boxplot(width = 0.2, alpha = 0)+
-  theme_bw()
+  theme_bw()+
+  theme(axis.text.x = element_blank(),
+        legend.position = "none")
+# ggsave("deviance_overall.png", deviance.plot, dpi = 300, units = "mm", width = 85, height = 85)
 
 # Mean deviance versus sum of squares - consistency of bends
-ggplot(deviance.data, aes(x = RootMeanSquareDeviance, y = MeanDeviance, col = nStomata))+
+deviance.consistency.plot <- ggplot(deviance.data, aes(x = MeanAbsDeviance, y = MeanDeviance, col = Folder))+
+  geom_abline(intercept = c(0, 0), slope = 1, col="grey")+
+  geom_abline(intercept = c(0, 0), slope = -1, col="grey")+
   geom_point()+
+  coord_cartesian(xlim=c(0, 30), ylim=c(-30, 30))+
   theme_bw()+
   theme(legend.position = "none")
-
-ggsave("Distance_plot.png", plot = dist.plot, dpi = 300, units = "mm", width = 85, height = 85)
+# ggsave("deviance_consistency.png", deviance.consistency.plot, dpi = 300, units = "mm", width = 85, height = 85)
 
 unassigned.stomata <- chain.distances %>%
   dplyr::ungroup() %>%
   dplyr::select(Folder, File, fUnassignedStomata) %>%
   dplyr::distinct()
-ggplot(unassigned.stomata, aes(x=Folder, y=fUnassignedStomata))+
-  geom_beeswarm()
+unass.plot <- ggplot(unassigned.stomata, aes(x=Folder, y=fUnassignedStomata))+
+  geom_beeswarm()+
+  theme_bw()+
+  theme(axis.text.x = element_blank())
+
+
+overall.plot <- (dist.plot + deviance.plot )/ (deviance.consistency.plot +unass.plot) + plot_annotation(tag_levels = c("A"))
+ggsave("output.png", overall.plot, dpi = 300, units = "mm", width = 170, height = 170)
+
