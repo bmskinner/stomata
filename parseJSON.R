@@ -14,9 +14,8 @@ library(filesstrings)
 library(autoimage)
 library(sf)
 
-MAX.DISTANCE <- 300
+# MAX.DISTANCE <- 300
 TRIM.DISTANCE <- 500
-SHORT.DISTANCE <- 350
 ANGLE.DELTA <- 15
 
 # Calculate centre of mass from JSON
@@ -42,16 +41,21 @@ get.border <- function(file){
     as.data.frame 
 }
 
-calc.coms <- function(border.data){
-  border.data %>%
+create.1mers <- function(border.data){
+  data <- border.data %>%
     dplyr::group_by(shape, file) %>%
     dplyr::summarise(x.com = mean(x), 
                      y.com = mean(y)) %>%
     dplyr::mutate(stomata  = paste0("s", sprintf("%02d", shape))) %>%
     dplyr::ungroup() %>%
-    dplyr::select(stomata, x.com, y.com) %>%
+    dplyr::select(stomata, x.com, y.com, file) %>%
     as.data.frame
-  
+    
+  # Create polygons from border
+  polys <- border.data %>% dplyr::group_by(shape, file) %>%
+    dplyr::summarise(poly.matrix = list(matrix(c(x, x[1], y, y[1]), ncol=2, byrow=F)))
+  data$polygons <- lapply(polys$poly.matrix, function(x) sf::st_polygon(list(x)))
+  data %>% dplyr::select(-file)
 }
 
 # Calculate distance between two points
@@ -65,23 +69,6 @@ find.mode <-  function(x) {
   d <- density(x)
   d$x[which.max(d$y)]
 }
-
-plot.2mers <- function(mer.data, img, border.data){
-  img.grob <- rasterGrob(img, interpolate=TRUE)
-  ggplot(mer.data)+
-    annotation_custom(img.grob, xmin=0, xmax=dim(img)[2], ymin=0, ymax=dim(img)[1]) +
-    coord_fixed(xlim = c(0, dim(img)[2]), ylim = c(0, dim(img)[1]))+
-    scale_color_viridis_c()+
-    geom_point(data = border.data, aes(x = x, y = y), col = "green", size=0.1)+
-    geom_point(aes(x = S1.x, y = S1.y))+
-    geom_point(aes(x = S2.x, y = S2.y))+
-    geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, col = S1S2))+
-    geom_text(aes(x = (S2.x+S1.x)/2, y = (S2.y+S1.y)/2, label = sprintf("%.0f", S1S2)), col = "blue", size = 2)+
-    theme_bw()+
-    theme(axis.title = element_blank())
-}
-
-
 
 create.debruijn.graph <- function(mer.data){
   uks <- unique(c(mer.data$merL, mer.data$merR)) # unique 2mers
@@ -135,15 +122,15 @@ create.contigs <- function(mer.data){
 plot.contigs <- function(mer.contigs, img, border.data){
   img.grob <- rasterGrob(img, interpolate=TRUE)
   # visualise the contigs
-  ggplot(mer.contigs, aes(col = as.factor(Contig)))+
+  ggplot(mer.contigs)+
     annotation_custom(img.grob, xmin=0, xmax=dim(img)[2], ymin=0, ymax=dim(img)[1]) +
     coord_fixed(xlim = c(0, dim(img)[2]), ylim = c(0, dim(img)[1]))+
-    geom_point(data = border.data, aes(x = x, y = y), col = "green", size=0.1)+
-    geom_point(aes(x = S1.x, y = S1.y), size=2)+
-    geom_point(aes(x = S2.x, y = S2.y), size=2)+
-    geom_point(aes(x = S3.x, y = S3.y), size=2)+
-    geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), linewidth=1) +
-    geom_segment(aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y), linewidth=1) +
+    geom_polygon(data = border.data, aes(x = x, y = y, group=shape), fill = "darkgreen", alpha=0.6)+
+    geom_point(aes(x = S1.x, y = S1.y, col = as.factor(Contig)), size=2)+
+    geom_point(aes(x = S2.x, y = S2.y, col = as.factor(Contig)), size=2)+
+    geom_point(aes(x = S3.x, y = S3.y, col = as.factor(Contig)), size=2)+
+    geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, col = as.factor(Contig)), linewidth=1) +
+    geom_segment(aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y, col = as.factor(Contig)), linewidth=1) +
     labs(col = "Chain")+
     theme_bw()+
     theme(axis.title = element_blank())
@@ -178,7 +165,8 @@ create.2mers <- function(coms, min.distance = 100, max.distance = 300){
                   kmer = paste0(S1, S2), 
                   abs.angle = LearnGeom::Angle(c(S1.x, S1.y+10), c(S1.x,  S1.y),  c(S2.x,S2.y))) %>% # angle of 2mer relative to image
     dplyr::filter(S1 != S2 &
-                  between(S1S2, min.distance, max.distance))
+                  between(S1S2, min.distance, max.distance)) %>%
+    dplyr::distinct()
   data$mer2id <- 1:nrow(data)
   return(data)
 }
@@ -210,24 +198,41 @@ process.json.file <- function(file){
   
   border.data <- get.border(file)
   
+  plot.2mers <- function(mer.data){
+    img.grob <- rasterGrob(img, interpolate=TRUE)
+    ggplot(mer.data)+
+      annotation_custom(img.grob, xmin=0, xmax=dim(img)[2], ymin=0, ymax=dim(img)[1]) +
+      coord_fixed(xlim = c(0, dim(img)[2]), ylim = c(0, dim(img)[1]))+
+      scale_color_viridis_c()+
+      geom_polygon(data = border.data, aes(x = x, y = y, group=shape), fill = "darkgreen", alpha=0.6)+
+      geom_point(aes(x = S1.x, y = S1.y))+
+      geom_point(aes(x = S2.x, y = S2.y))+
+      geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), col="gray20")+
+      geom_text(aes(x = (S2.x+S1.x)/2, y = (S2.y+S1.y)/2, label = sprintf("%.0f", S1S2)), col = "blue", size = 2)+
+      geom_text(aes(x = S1.x, y = S1.y, label = S1), col = "pink1", size = 2)+
+      geom_text(aes(x = S2.x, y = S2.y, label = S2), col = "pink1", size = 2)+
+      theme_bw()+
+      theme(axis.title = element_blank())
+  }
+  
   plot.3mers <- function(mer.data){
     img.grob <- rasterGrob(img, interpolate=TRUE)
     ggplot(mer.data)+
       annotation_custom(img.grob, xmin=0, xmax=dim(img)[2], ymin=0, ymax=dim(img)[1]) +
       coord_fixed(xlim = c(0, dim(img)[2]), ylim = c(0, dim(img)[1]))+
       scale_color_viridis_c()+
-      geom_point(data = border.data, aes(x = x, y = y), col = "green", size=0.1)+
+      geom_polygon(data = border.data, aes(x = x, y = y, group=shape), fill = "darkgreen", alpha=0.6)+
       geom_point(aes(x = S1.x, y = S1.y))+
       geom_point(aes(x = S2.x, y = S2.y))+
       geom_point(aes(x = S3.x, y = S3.y))+
-      geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, col = S1S2))+
-      geom_segment(aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y, col = S2S3)) +
+      geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), col="gray20")+
+      geom_segment(aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y), col="gray20") +
       geom_text(aes(x = S2.x, y = S2.y+50, label = sprintf("%.0f", angle)), col = "red", size = 2)+
       geom_text(aes(x = (S2.x+S1.x)/2, y = (S2.y+S1.y)/2, label = sprintf("%.0f", S1S2)), col = "blue", size = 2)+
       geom_text(aes(x = (S2.x+S3.x)/2, y = (S2.y+S3.y)/2, label = sprintf("%.0f", S2S3)), col = "blue", size = 2)+
-      geom_text(aes(x = S1.x, y = S1.y, label = S1), col = "purple", size = 2)+
-      geom_text(aes(x = S2.x, y = S2.y, label = S2), col = "purple", size = 2)+
-      geom_text(aes(x = S3.x, y = S3.y, label = S3), col = "purple", size = 2)+
+      geom_text(aes(x = S1.x, y = S1.y, label = S1), col = "pink1", size = 2)+
+      geom_text(aes(x = S2.x, y = S2.y, label = S2), col = "pink1", size = 2)+
+      geom_text(aes(x = S3.x, y = S3.y, label = S3), col = "pink1", size = 2)+
       theme_bw()+
       theme(axis.title = element_blank())
   }
@@ -237,16 +242,13 @@ process.json.file <- function(file){
     plot
   }
 
-  
-
-  
-  mer1 <- calc.coms(border.data) # centres of mass as points
+  mer1 <- create.1mers(border.data) # centres of mass as points
 
   # Create distance table between pairs of stomata
   # Filter to only those within a given distance
   cat("  Calculating distances\n")
   mer2 <- create.2mers(mer1, min.distance = 100, max.distance = TRIM.DISTANCE)
-  mer.2.plot <- plot.2mers(mer2, img, border.data)
+  mer.2.plot <- plot.2mers(mer2)
   save.plot(mer.2.plot, ".mer2.raw.png")
   
   
@@ -254,42 +256,34 @@ process.json.file <- function(file){
   
   # Remove edges in the graph that intersect a third stomata
   # can use sf: https://stackoverflow.com/questions/61703791/determine-lines-that-intersect-a-polygon-in-r
-  
-  # Create polygons for stomata ensuring polygons are closed
-  polys <- border.data %>% dplyr::group_by(shape, file) %>%
-    dplyr::summarise(poly.matrix = list(matrix(c(x, x[1], y, y[1]), ncol=2, byrow=F)))
-  stomata.polys <- lapply(polys$poly.matrix, function(x) sf::st_polygon(list(x)))
+  # Create line objects
+  mer2$lines <- lapply(1:nrow(mer2), function(i) sf::st_linestring(rbind(c(mer2$S1.x[i], mer2$S1.y[i]),
+                                                                         c(mer2$S2.x[i], mer2$S2.y[i]))) )
   
   # Check each 2mer for intersections with a stomata
-  lines.2mers <- lapply(1:nrow(mer2), function(i)  {
-    l<- sf::st_linestring(rbind(c(mer2$S1.x[i], mer2$S1.y[i]),c(mer2$S2.x[i], mer2$S2.y[i])))
-    m<- lapply(stomata.polys, function(p) sf::st_intersects(l, p))
-  })
-  
-  # Keep lines with <=3 intersections (why 3 or fewer? check reason - TODO) start, end, and ?
-  mer2.keep <- sapply(lines.2mers, function(l) sum(unlist(l) ))<3
-  mer2.filt <- mer2[mer2.keep,]
-  
-  ###############
-  
+  mer2$intersects <- lapply(mer2$lines, function(l) sum(unlist(sapply(mer1$polygons, sf::st_intersects, y=l))))
+
+  mer2.filt <- mer2 %>%
+    dplyr::filter(intersects <= 2)
+
   # mer.2.drop.plot <- plot.2mers(mer2[!mer2.keep,], img, border.data)
   # ggsave(str_replace(file, ".json", ".mer2.drop.png"), plot = mer.2.drop.plot, dpi = 300, units = "mm", width = 170, height = 140)
   # 
-  mer.2.filt.plot <- plot.2mers(mer2.filt, img, border.data)
+  mer.2.filt.plot <- plot.2mers(mer2.filt)
   save.plot(mer.2.filt.plot, ".mer2.filt.png")
   
   # Join the tables to create a 3-mer chain
   mer3 <- create.3mers(mer2.filt)
-  mer.3.plot <- save.plot(plot.3mers(mer3), ".mer3.raw.png")
+  # mer.3.plot <- save.plot(plot.3mers(mer3), ".mer3.raw.png")
   
   # Find the 3mers in straight lines
   mer3.straight <- mer3 %>% dplyr::filter( angle > 180 - ANGLE.DELTA)
-  mer.3.straight.plot <- save.plot(plot.3mers(mer3.straight), ".mer3.straight.png")
+  # mer.3.straight.plot <- save.plot(plot.3mers(mer3.straight), ".mer3.straight.png")
   
   # Filter the straight 3mers to the most common orientation in the image
   modal.angle <- find.mode(mer3.straight$abs.angle)
   mer3.filt <- mer3.straight %>% dplyr::filter(between(abs.angle, modal.angle - ANGLE.DELTA, modal.angle+ANGLE.DELTA))
-  mer.3.filt.plot <- save.plot(plot.3mers(mer3.filt), ".mer3.filtered.png")
+  # mer.3.filt.plot <- save.plot(plot.3mers(mer3.filt), ".mer3.filtered.png")
   
   # Pruning step
   # Look for 2mers present more than once
@@ -306,7 +300,6 @@ process.json.file <- function(file){
 
   # Pruning step - remove any kmers where the endpoint is in the middle of a chain
   # to prevent branches
-
   mer3.longer <- mer3.pruned %>%
     pivot_longer(c(S1, S2, S3), names_to = "StomataPosition", values_to = "Stomata") %>%
     dplyr::group_by(StomataPosition, Stomata) %>%
@@ -316,17 +309,8 @@ process.json.file <- function(file){
     tidyr::pivot_wider(names_from = StomataPosition, values_from = Stomata) %>%
     na.omit # remove the rows with NAs due to our slice
 
-  # This still leaves branches when the endpoints meet a terminal kmer. We must check
-  # for these explicitly, looking for 1mers that are part of 2+ 3mers without shared 1mers
-  
-  # mer3.longer %>% 
-  #   
-  #   
-  #   dplyr::group_by(S1) %>%
-  #   dplyr::mutate(mer1unique = list(unique(c(S1, S2))))
-  
-    
-  # TODO Prune again - cases where the branch meets a terminal 2mer
+  # This still leaves branches when the endpoints meet a terminal kmer.
+  # Prune again - cases where the branch meets a terminal 2mer
   # Look for 1mers that are are the S2 of 2 different 2mers
   mer3.terminal <- mer3.longer %>%
     tidyr::pivot_longer(c(merL, merR), names_to = "mer2Type", values_to = "mer2") %>%
@@ -366,29 +350,26 @@ process.json.file <- function(file){
   mer.3.pruned.plot <- save.plot(plot.3mers(mer3.terminal), ".mer3.pruned.png")
   
   # Check the distribution of angles in mer3 vs mer2
-  density.plot <- ggplot()+
-    geom_density(data = mer2, aes(x = abs.angle, col="mer2 raw" ), alpha=0) +
-    geom_density(data = mer3, aes(x = abs.angle, col="mer3 raw" ), alpha=0) +
-    geom_density(data = mer3.straight, aes(x = abs.angle, col="mer3 straight")) +
-    geom_density(data = mer3.terminal, aes(x = abs.angle, col="mer3 longer" )) +
-    labs(x = "Angle of kmer to vertical") +
-    scale_color_manual(values = c("black", "red", "green", "blue"))+
-    theme_bw()+
-    theme(legend.position = c(0.8, 0.8),
-          legend.title = element_blank(),
-          legend.background = element_blank())
-  ggsave(str_replace(file, ".json", "mer2.mer3.angle_density.png"), plot = density.plot, dpi = 300, units = "mm", width = 100, height = 85)
+  # density.plot <- ggplot()+
+  #   geom_density(data = mer2, aes(x = abs.angle, col="mer2 raw" ), alpha=0) +
+  #   geom_density(data = mer3, aes(x = abs.angle, col="mer3 raw" ), alpha=0) +
+  #   geom_density(data = mer3.straight, aes(x = abs.angle, col="mer3 straight")) +
+  #   geom_density(data = mer3.terminal, aes(x = abs.angle, col="mer3 longer" )) +
+  #   labs(x = "Angle of kmer to vertical") +
+  #   scale_color_manual(values = c("black", "red", "green", "blue"))+
+  #   theme_bw()+
+  #   theme(legend.position = c(0.8, 0.8),
+  #         legend.title = element_blank(),
+  #         legend.background = element_blank())
+  # ggsave(str_replace(file, ".json", "mer2.mer3.angle_density.png"), plot = density.plot, dpi = 300, units = "mm", width = 100, height = 85)
   
-  mer3.short <- mer3.terminal #%>% dplyr::filter(S1S2 < SHORT.DISTANCE & S2S3 < SHORT.DISTANCE)
+  mer3.short.plot <- save.plot(plot.3mers(mer3.terminal), ".mer3.terminal.png")
   
-  mer3.short.plot <- save.plot(plot.3mers(mer3.short), ".mer3.short.png")
-  
-  short.contigs <- create.contigs(mer3.short) %>% 
+  short.contigs <- create.contigs(mer3.terminal) %>% 
     dplyr::group_by(Contig)
-  
 
-  chain.plot <- plot.contigs(short.contigs, img, border.data)
-  
+  chain.plot <- save.plot(plot.contigs(short.contigs, img, border.data), ".chains.png")
+
   # Match contigs to the 2mers they contain
   contig.assignment <- short.contigs %>% dplyr::select(Contig, merL, merR) %>%
     tidyr::pivot_longer(c(merL, merR), values_to = "kmer") %>%
@@ -446,6 +427,10 @@ process.json.file <- function(file){
   remainder.stomata <- mer1$stomata[ !(mer1$stomata %in% stomata.in.contgs)]
   cat( length(remainder.stomata), "not in chains\n")
   
+  dist.contigs$nStomata <- length(unique(mer1$stomata))
+  dist.contigs$unassignedStomata <- length(remainder.stomata)
+  dist.contigs$fUnassignedStomata <- length(remainder.stomata)/length(unique(mer1$stomata))
+  
   rotated.plot <- ggplot(dist.contigs)+
     geom_segment(aes(x = Contig.start.x, y = Contig.start.y, xend = RotatedContigEnd[,1], yend = RotatedContigEnd[,2]), col = "black")+
     geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), col = "grey")+
@@ -453,25 +438,18 @@ process.json.file <- function(file){
     theme_bw()
   
   ggsave(str_replace(file, ".json", ".chain.rotated.png"), plot = rotated.plot, dpi = 300, units = "mm", width = 170, height = 140)
-  
-  chain.file <- str_replace(file, ".json", ".chains.png")
-  cat("  Plotting contigs\n")
-  ggsave(chain.file, plot = chain.plot, dpi = 300, units = "mm", width = 170, height = 140)
   return(dist.contigs)
 }
 
+# Remove existing png output files
+unlink(list.files(path="stomatal_image", pattern = "*.mer*.*.png", recursive = T, full.names = T))
+unlink(list.files(path="stomatal_image", pattern = "*chain.*.png", recursive = T, full.names = T))
 
 # Read all json files
 files <- list.files(path = "stomatal_image", pattern = "*.json",  recursive = T, full.names = T)
 
 chain.distances <- do.call(rbind, lapply(files, process.json.file))
 chain.distances$Folder <- dirname(chain.distances$File)
-
-# dplyr::group_by(Contig) %>%
-#   dplyr::summarise(MeanDistance  = mean(S1S2),
-#                    MedianDistance = median(S1S2),
-#                    SD = sd(S1S2),
-#                    nPairs = n()) %>%
 
 
 dist.plot <- ggplot(chain.distances, aes(x=Folder, y = S1S2))+
@@ -513,4 +491,9 @@ ggplot(deviance.data, aes(x = RootMeanSquareDeviance, y = MeanDeviance, col = nS
 
 ggsave("Distance_plot.png", plot = dist.plot, dpi = 300, units = "mm", width = 85, height = 85)
 
-# TODO - find endpoints of each contig, measure deviation from straight line
+unassigned.stomata <- chain.distances %>%
+  dplyr::ungroup() %>%
+  dplyr::select(Folder, File, fUnassignedStomata) %>%
+  dplyr::distinct()
+ggplot(unassigned.stomata, aes(x=Folder, y=fUnassignedStomata))+
+  geom_beeswarm()
