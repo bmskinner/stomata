@@ -35,7 +35,16 @@ get.border <- function(file){
                "x" = bounds$X,
                "y" = bounds$Y,
                "file" = file)
-    shape.number <<- shape.number+1
+    
+    # stomata cannot be huge- filter misclicks
+    if( max(result$X) - min(result$X) > MAX.DISTANCE || max(result$y) - min(result$y) > MAX.DISTANCE){
+      result <-  data.frame("shape" = c(),
+                            "x" = c(),
+                            "y" = c(),
+                            "file" = c())
+    } else {
+      shape.number <<- shape.number+1
+    }
     return(result)
   }
   
@@ -49,7 +58,8 @@ create.1mers <- function(border.data){
   data <- border.data %>%
     dplyr::group_by(shape, file) %>%
     dplyr::summarise(x.com = mean(x), 
-                     y.com = mean(y)) %>%
+                     y.com = mean(y), 
+                     .groups = 'drop') %>%
     dplyr::mutate(stomata  = paste0("s", sprintf("%02d", shape))) %>%
     dplyr::ungroup() %>%
     dplyr::select(stomata, x.com, y.com, file) %>%
@@ -57,7 +67,7 @@ create.1mers <- function(border.data){
     
   # Create polygons from border
   polys <- border.data %>% dplyr::group_by(shape, file) %>%
-    dplyr::summarise(poly.matrix = list(matrix(c(x, x[1], y, y[1]), ncol=2, byrow=F)))
+    dplyr::summarise(poly.matrix = list(matrix(c(x, x[1], y, y[1]), ncol=2, byrow=F)), .groups = 'drop')
   data$polygons <- lapply(polys$poly.matrix, function(x) sf::st_polygon(list(x)))
   data %>% dplyr::select(-file)
 }
@@ -112,14 +122,19 @@ create.contigs <- function(mer.data){
   
   # Get the number of the contig each 2mer belongs to
   get.contig.number <- function(i){
+    # cat("    Getting contig", i, "\n")
     gph <- gphs[[i]]
     contig <- vertex_attr(gph, "kmer")
     contig.num <- rep(i, length(contig))
     names(contig.num) <- contig
+    # cat("    Contig", i, "is",contig.num, "\n")
+    # cat("    Contig", i, ": ",names(contig.num), "\n")
+    # cat("    Contig", i, ": ",str(contig.num), "\n")
     contig.num
   }
   
-  contig.numbers <- do.call(c, sapply(1:length(gphs), get.contig.number))
+  # cat("  Graph has", length(gphs), "contigs\n")
+  contig.numbers <- do.call(c, lapply(1:length(gphs), get.contig.number))
   
   mer.data %>%
     dplyr::mutate(Contig = map_int(merL, function(x) contig.numbers[names(contig.numbers)==x]))
@@ -156,7 +171,10 @@ create.2mers <- function(coms, min.distance, max.distance){
     dplyr::filter(S1 != S2 &
                   between(S1S2, min.distance, max.distance)) %>%
     dplyr::distinct()
-  data$mer2id <- 1:nrow(data)
+  
+  if(nrow(data)>0){
+    data$mer2id <- 1:nrow(data)
+  }
   return(data)
 }
 
@@ -186,6 +204,12 @@ process.json.file <- function(file){
   img <- flipImage (img, mode = "vertical")
   
   border.data <- get.border(file)
+  
+  if(nrow(border.data)<=1){
+    # return empty dist.contigs dataframe
+    cat("  No objects in json file, returning\n")
+    return(data.frame())
+  }
   
   plot.2mers <- function(mer.data){
     img.grob <- rasterGrob(img, interpolate=TRUE)
@@ -267,18 +291,29 @@ process.json.file <- function(file){
     plot
   }
 
+  cat("  Creating 1mers\n")
   mer1 <- create.1mers(border.data) # centres of mass as points
 
   # Create distance table between pairs of stomata
   # Filter to only those within a given distance
-  cat("  Calculating distances\n")
+  cat("  Creating 2mers\n")
   mer2 <- create.2mers(mer1, min.distance = MIN.DISTANCE, max.distance = MAX.DISTANCE)
+  
+  # What happens if no/very few stomata are present in the image that cannot be 
+  # contiged? Check there are rows present, and skip if not.
+  if(nrow(mer2)<=1){
+    # return empty dist.contigs dataframe
+    cat("  No 2mers, returning\n")
+    return(data.frame())
+  }
+  
   mer.2.plot <- plot.2mers(mer2)
   save.plot(mer.2.plot, ".mer2.raw.png")
   
   
   ###################
   
+  cat("  Removing intersecting 2mers\n")
   # Remove edges in the graph that intersect a third stomata
   # can use sf: https://stackoverflow.com/questions/61703791/determine-lines-that-intersect-a-polygon-in-r
   # Create line objects
@@ -290,6 +325,12 @@ process.json.file <- function(file){
 
   mer2.filt <- mer2 %>%
     dplyr::filter(intersects <= 2)
+  
+  if(nrow(mer2.filt)<=1){
+    # return empty dist.contigs dataframe
+    cat("  No 2mers after filtering, returning\n")
+    return(data.frame())
+  }
 
   # mer.2.drop.plot <- plot.2mers(mer2[!mer2.keep,], img, border.data)
   # ggsave(str_replace(file, ".json", ".mer2.drop.png"), plot = mer.2.drop.plot, dpi = 300, units = "mm", width = 170, height = 140)
@@ -301,14 +342,35 @@ process.json.file <- function(file){
   mer3 <- create.3mers(mer2.filt)
   # mer.3.plot <- save.plot(plot.3mers(mer3), ".mer3.raw.png")
   
+  if(nrow(mer3)<=1){
+    # return empty dist.contigs dataframe
+    cat("  No 3mers, returning\n")
+    return(data.frame())
+  }
+  
   # Find the 3mers in straight lines
   mer3.straight <- mer3 %>% dplyr::filter( angle > 180 - ANGLE.DELTA)
   mer.3.straight.plot <- save.plot(plot.3mers(mer3.straight), ".mer3.straight.png")
   
+  # cat("Filtering on angle\n")
+  
   # Filter the straight 3mers to the most common orientation in the image
-  modal.angle <- find.mode(mer3.straight$abs.angle)
+  # TODO - this does not work when the 3mers are vertical. 
+  # Possible fix - find the mode on mer2 raw instead; seems more consistent
+   # Still not perfect - may need to look only at local maxima
+  modal.angle <- find.mode(mer2$abs.angle)
+  # modal.angle <- find.mode(mer3.straight$abs.angle)
   mer3.filt <- mer3.straight %>% dplyr::filter(between(abs.angle, modal.angle - ANGLE.DELTA, modal.angle+ANGLE.DELTA))
   # mer.3.filt.plot <- save.plot(plot.3mers(mer3.filt), ".mer3.filtered.png")
+  
+  if(nrow(mer3.filt)<=1){
+    # return empty dist.contigs dataframe
+    cat("  No 3mers after filtering, returning\n")
+    return(data.frame())
+  }
+  
+
+  # cat("Pruning 3mers\n")
   
   # Pruning step
   # Look for 2mers present more than once
@@ -322,7 +384,6 @@ process.json.file <- function(file){
     dplyr::arrange(merR, desc(angle)) %>%
     dplyr::slice_head(n=1)
   
-
   # Pruning step - remove any kmers where the endpoint is in the middle of a chain
   # to prevent branches
   mer3.longer <- mer3.pruned %>%
@@ -333,7 +394,17 @@ process.json.file <- function(file){
     dplyr::slice_head(n=1) %>% # take only the 3mer with the highest angle
     tidyr::pivot_wider(names_from = StomataPosition, values_from = Stomata) %>%
     na.omit # remove the rows with NAs due to our slice
+  
 
+  # What happens if no/very few stomata are present in the image that cannot be 
+  # contiged? Check there are rows present, and skip if not.
+  if(nrow(mer3.longer)<=1){
+    # return empty dist.contigs dataframe
+    cat("No rows in filtered 3mers, returning\n")
+    return(data.frame())
+  }
+  
+  # cat("Removing terminal branches\n")
   # This still leaves branches when the endpoints meet a terminal kmer.
   # Prune again - cases where the branch meets a terminal 2mer
   # Look for 1mers that are are the S2 of 2 different 2mers
@@ -371,22 +442,28 @@ process.json.file <- function(file){
     tidyr::pivot_wider(names_from = "mer2Type", values_from = "mer2") %>%
     na.omit
   
+  if(nrow(mer3.terminal)<=1){
+    # return empty dist.contigs dataframe
+    cat("  No 3mers after pruning, returning\n")
+    return(data.frame())
+  }
+  
   
   # mer.3.pruned.plot <- save.plot(plot.3mers(mer3.terminal), ".mer3.pruned.png")
   
   # Check the distribution of angles in mer3 vs mer2
-  # density.plot <- ggplot()+
-  #   geom_density(data = mer2, aes(x = abs.angle, col="mer2 raw" ), alpha=0) +
-  #   geom_density(data = mer3, aes(x = abs.angle, col="mer3 raw" ), alpha=0) +
-  #   geom_density(data = mer3.straight, aes(x = abs.angle, col="mer3 straight")) +
-  #   geom_density(data = mer3.terminal, aes(x = abs.angle, col="mer3 longer" )) +
-  #   labs(x = "Angle of kmer to vertical") +
-  #   scale_color_manual(values = c("black", "red", "green", "blue"))+
-  #   theme_bw()+
-  #   theme(legend.position = c(0.8, 0.8),
-  #         legend.title = element_blank(),
-  #         legend.background = element_blank())
-  # ggsave(str_replace(file, ".json", "mer2.mer3.angle_density.png"), plot = density.plot, dpi = 300, units = "mm", width = 100, height = 85)
+  density.plot <- ggplot()+
+    geom_density(data = mer2, aes(x = abs.angle, col="mer2 raw" ), alpha=0) +
+    geom_density(data = mer3, aes(x = abs.angle, col="mer3 raw" ), alpha=0) +
+    geom_density(data = mer3.straight, aes(x = abs.angle, col="mer3 straight")) +
+    geom_density(data = mer3.terminal, aes(x = abs.angle, col="mer3 longer" )) +
+    labs(x = "Angle of kmer to vertical") +
+    scale_color_manual(values = c("black", "red", "green", "blue"))+
+    theme_bw()+
+    theme(legend.position = c(0.8, 0.8),
+          legend.title = element_blank(),
+          legend.background = element_blank())
+  ggsave(str_replace(file, ".json", "mer2.mer3.angle_density.png"), plot = density.plot, dpi = 300, units = "mm", width = 100, height = 85)
   
   mer3.short.plot <- save.plot(plot.3mers(mer3.terminal), ".mer3.terminal.png")
   
@@ -450,8 +527,7 @@ process.json.file <- function(file){
   # How many stomata are not in a chain? TODO - check
   stomata.in.contgs <- unique(c(short.contigs$S1, short.contigs$S2, short.contigs$S3))
   remainder.stomata <- mer1$stomata[ !(mer1$stomata %in% stomata.in.contgs)]
-  cat( length(remainder.stomata), "not in chains\n")
-  
+
   dist.contigs$nStomata <- length(unique(mer1$stomata))
   dist.contigs$unassignedStomata <- length(remainder.stomata)
   dist.contigs$fUnassignedStomata <- length(remainder.stomata)/length(unique(mer1$stomata))
