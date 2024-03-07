@@ -14,6 +14,7 @@ library(filesstrings)
 library(autoimage)
 library(sf)
 library(patchwork)
+library(filesstrings)
 # min and maximum distance between stomata
 MIN.DISTANCE <- 100
 MAX.DISTANCE <- 500
@@ -115,7 +116,7 @@ create.contigs <- function(mer.data){
 
   # Visualise the graph
   layout <- layout_with_kk(g)
-  plot(g, layout = layout)
+  # plot(g, layout = layout)
   
   # Decompose unlinked contigs
   gphs <- decompose.graph(g)
@@ -547,16 +548,24 @@ process.json.file <- function(file){
   return(dist.contigs)
 }
 
-# Remove existing png output files
-unlink(list.files(path="stomatal_image", pattern = "*.mer*.*.png", recursive = T, full.names = T))
-unlink(list.files(path="stomatal_image", pattern = "*chain.*.png", recursive = T, full.names = T))
+filesstrings::create_dir("figure")
 
-# Read all json files
-files <- list.files(path = "stomatal_image", pattern = "*.json",  recursive = T, full.names = T)
+chain.distance.file <- "chain.distances.Rds"
+if(!file.exists(chain.distance.file)){
+  
+  # Remove existing png output files
+  unlink(list.files(path="stomatal_image", pattern = "*.mer*.*.png", recursive = T, full.names = T))
+  unlink(list.files(path="stomatal_image", pattern = "*chain.*.png", recursive = T, full.names = T))
+  
+  # Read all json files
+  files <- list.files(path = "stomatal_image", pattern = "*.json",  recursive = T, full.names = T)
+  
+  chain.distances <- do.call(rbind, lapply(files[1:3], process.json.file))
+  chain.distances$Folder <- dirname(chain.distances$File)
+  saveRDS(chain.distances, file="chain.distances.Rds")
+}
 
-chain.distances <- do.call(rbind, lapply(files, process.json.file))
-chain.distances$Folder <- dirname(chain.distances$File)
-
+chain.distances <- readRDS("chain.distances.Rds")
 
 dist.plot <- ggplot(chain.distances, aes(x=Folder, y = S1S2))+
   geom_beeswarm(col="darkgrey")+
@@ -615,5 +624,5 @@ unass.plot <- ggplot(unassigned.stomata, aes(x=Folder, y=fUnassignedStomata))+
 
 
 overall.plot <- (dist.plot + deviance.plot )/ (deviance.consistency.plot +unass.plot) + plot_annotation(tag_levels = c("A"))
-ggsave("output.png", overall.plot, dpi = 300, units = "mm", width = 170, height = 170)
+ggsave("figure/output.png", overall.plot, dpi = 300, units = "mm", width = 170, height = 170)
 

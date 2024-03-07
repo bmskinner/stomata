@@ -8,3 +8,6 @@
 *.pyc
 *.tiff
 .Rhistory
+.Rproj.user
+stomatal*/*
+
