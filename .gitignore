@@ -7,7 +7,15 @@
 *.zip
 *.pyc
 *.tiff
+*.png
 .Rhistory
 .Rproj.user
+*.Rproj
+*.Rds
+*.Rdata*
+.Rprofile
 stomatal*/*
+using_anylabelling/*
+figure/*
+data/*
 
