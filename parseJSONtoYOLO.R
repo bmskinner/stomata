@@ -5,7 +5,7 @@
 library(jsonlite)
 library(tidyverse)
 library(magrittr)
-library(filesstrings)
+library(fs)
 
 # Calculate centre of mass from JSON
 get.border <- function(file){
@@ -77,14 +77,13 @@ out.data <- bbox.data %>%
 # images/val/b.jpg
 # labels/train/a.txt
 # labels/val/b.txt
-filesstrings::dir.remove("data")
-filesstrings::create_dir("data")
-filesstrings::create_dir("data/images")
-filesstrings::create_dir("data/labels")
-filesstrings::create_dir("data/images/train/")
-filesstrings::create_dir("data/images/val/")
-filesstrings::create_dir("data/labels/train/")
-filesstrings::create_dir("data/labels/val/")
+
+fs::file_delete("data.zip")
+fs::dir_delete("data")
+fs::dir_create("data/images/train/")
+fs::dir_create("data/images/val/")
+fs::dir_create("data/labels/train/")
+fs::dir_create("data/labels/val/")
 
 write.yolo.v8.bounds <- function(source.image.name){
   yolo.data <- out.data %>% dplyr::filter(imageName==source.image.name)
@@ -111,6 +110,13 @@ write.yolo.v8.bounds <- function(source.image.name){
 sapply(unique(out.data$imageName), write.yolo.v8.bounds)
 
 
+YOLO.MODEL <- "yolov8n"
+YOLO.YAML.FILE  <- paste0("stomata.", YOLO.MODEL, ".yaml")
+YOLO.PYTHON.FILE  <- paste0("stomata.", YOLO.MODEL, ".py")
+YOLO.PREDICT.FILE  <- paste0("stomata.", YOLO.MODEL, "_predict.py")
+YOLO.WRAPPER.FILE  <- paste0("stomata.", YOLO.MODEL, ".sh")
+
+
 # Create YOLO training YAML
 yolo.yaml <- paste0(
   "path: /home/bs19022/projects/stomata/data\n",
@@ -122,40 +128,40 @@ yolo.yaml <- paste0(
   "  0: stomata\n"
 )
 
-write_file(yolo.yaml, file = "stomata_v9.yaml")
+write_file(yolo.yaml, file = YOLO.YAML.FILE)
 
 # Create python file to run training
 
 yolo.python <- paste0(
 "from ultralytics import YOLO
 
-model = YOLO(\"yolov9n.pt\") # load a pretrained model
+model = YOLO(\"", YOLO.MODEL, "\") # load a pretrained model
   
 results = model.train(
-  data=\"stomata_v9.yaml\",
+  data=\"", YOLO.YAML.FILE, "\",
   imgsz=1280,
   epochs=100, 
   batch=4, 
-  name=\"yolov9n_tune_stomata\"
+  name=\"", YOLO.MODEL, "_stomata\"
 ) # train the model
 metrics = model.val() # evaluate model performance on the validation set
 
 # Do we want to tune the model hyperparameters?
-result_grid = model.tune(data=\"stomata_v9.yaml\", epochs=30, iterations=300, optimizer=\"AdamW\", plots=False, save=False, val=False)
+# result_grid = model.tune(data=\"stomata.", YOLO.MODEL, ".yaml\", epochs=30, iterations=300, optimizer=\"AdamW\", plots=False, save=False, val=False)
 
 path = model.export(format=\"onnx\")  # export the model to ONNX format
   
 "
 )
 
-write_file(yolo.python, file = "stomata_v9.py")
+write_file(yolo.python, file = YOLO.PYTHON.FILE)
 
 yolo.predict <- paste0(
 "import cv2
 from ultralytics import YOLO
 
 # Read the pretrained model
-model = YOLO(\"runs/detect/yolov9n_stomata/weights/best.pt\")
+model = YOLO(\"runs/detect/", YOLO.MODEL, "_stomata/weights/best.pt\")
 
 # Read a test image and predict stomata locations
 im2 = cv2.imread(\"stomatal_image/August\ 21\ -\ 25\ samples/1012-1-1.jpg\")
@@ -163,7 +169,7 @@ results = model.predict(source=im2, save=True, save_txt=True)
 "  
 )
 
-write_file(yolo.predict, file = "stomata_v9_predict.py")
+write_file(yolo.predict, file = YOLO.PREDICT.FILE)
 
 # Create wrapper script to submit the job to a GPU node
 yolo.wrapper <- paste0(
@@ -176,20 +182,20 @@ yolo.wrapper <- paste0(
 #$ -l gpu=1
 #$ -M b.skinner@essex.ac.uk
 #$ -m e
-#$ -o /home/bs19022/projects/stomata/runs/stomata_v9.log.txt
-#$ -e /home/bs19022/projects/stomata/runs/stomata_v9.log.txt
+#$ -o /home/bs19022/projects/stomata/runs/", YOLO.MODEL, ".log.txt
+#$ -e /home/bs19022/projects/stomata/runs/", YOLO.MODEL, ".log.txt
 
 source /usr/local/gpuallocation.sh
 # This is only needed once to create the conda env on a GPU node
 #conda create -y -n stomata ultralytics pytorch torchvision
 
 source activate stomata
-python stomata_v9.py
+python ", YOLO.PYTHON.FILE, "
 conda deactivate
 "
 )
 
-write_file(yolo.wrapper, file = "stomata_v9.sh")
+write_file(yolo.wrapper, file = YOLO.WRAPPER.FILE)
 # Zip the data
 zip("data.zip", "data")
 
