@@ -560,20 +560,30 @@ if(!file.exists(chain.distance.file)){
   # Read all json files
   files <- list.files(path = "stomatal_image", pattern = "*.json",  recursive = T, full.names = T)
   
-  chain.distances <- do.call(rbind, lapply(files[1:3], process.json.file))
+  chain.distances <- do.call(rbind, lapply(files, process.json.file))
   chain.distances$Folder <- dirname(chain.distances$File)
   saveRDS(chain.distances, file="chain.distances.Rds")
 }
 
-chain.distances <- readRDS("chain.distances.Rds")
+chain.distances <- readRDS("chain.distances.Rds") %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(Folder = basename(Folder),
+                Folder = str_replace(Folder, "- Annotations Done", ""))
 
 dist.plot <- ggplot(chain.distances, aes(x=Folder, y = S1S2))+
-  geom_beeswarm(col="darkgrey")+
-  geom_boxplot(alpha=0)+
+  geom_hline(yintercept = median(chain.distances$S1S2))+
+  geom_violin()+
+  geom_boxplot(width=0.2, alpha=0)+
   labs(y = "Distance between stomata pairs (pixels)")+
   theme_bw()+
-  theme(axis.text.x = element_blank())
-# ggsave("Distance_plot.png", plot = dist.plot, dpi = 300, units = "mm", width = 85, height = 85)
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+ggsave("figure/Distance_plot.png", plot = dist.plot, dpi = 300, units = "mm", width = 170, height = 170)
+
+# Are the distances significantly different?
+kruskal.data <- data.frame("Folder" =  chain.distances$Folder, "S1S2" = chain.distances$S1S2)
+kruskal.test(S1S2 ~ Folder, data  = kruskal.data)
+kruskal.data.dunn <- rstatix::dunn_test(kruskal.data, formula = S1S2 ~ Folder, detailed = T)
+
 
 # Look at deviances in each contig
 deviance.data <- chain.distances %>%
@@ -590,38 +600,62 @@ deviance.data <- chain.distances %>%
                     MeanDeviance = SumDeviance/nStomata,
                     MeanAbsDeviance = SumAbsDeviance / nStomata,
                     RootSumSqareDeviance = sqrt( sum(Deviance^2)),
-                    RootMeanSquareDeviance = sqrt( sum(Deviance^2)/nStomata  )
+                    RootMeanSquareDeviance = sqrt( sum(Deviance^2)/nStomata  ),
+                    DevianceRatio = MeanDeviance/MeanAbsDeviance
   )
 
 # Overall levels of deviance from straight line in contig
-deviance.plot <- ggplot(deviance.data, aes(x = File, y = MeanDeviance, col=Folder))+
+deviance.plot <- ggplot(deviance.data, aes(x = Folder, y = MeanDeviance))+
   geom_hline(yintercept = 0)+
-  geom_beeswarm()+
+  geom_violin()+
+  # geom_beeswarm()+
   geom_boxplot(width = 0.2, alpha = 0)+
   theme_bw()+
-  theme(axis.text.x = element_blank(),
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
         legend.position = "none")
-# ggsave("deviance_overall.png", deviance.plot, dpi = 300, units = "mm", width = 85, height = 85)
+ggsave("figure/deviance_overall.png", deviance.plot, dpi = 300, units = "mm", width = 170, height = 170)
 
 # Mean deviance versus sum of squares - consistency of bends
-deviance.consistency.plot <- ggplot(deviance.data, aes(x = MeanAbsDeviance, y = MeanDeviance, col = Folder))+
-  geom_abline(intercept = c(0, 0), slope = 1, col="grey")+
-  geom_abline(intercept = c(0, 0), slope = -1, col="grey")+
-  geom_point()+
-  coord_cartesian(xlim=c(0, 30), ylim=c(-30, 30))+
+deviance.consistency.plot <- ggplot(deviance.data, aes(x = MeanAbsDeviance, y = MeanDeviance))+
+  geom_hex(bins = 100)+
+  # geom_abline(intercept = c(0, 0), slope = 1, col="grey")+
+  # geom_abline(intercept = c(0, 0), slope = -1, col="grey")+
+  # geom_point()+
+  coord_cartesian(xlim=c(0, 30), ylim=c(-30, 30), expand = FALSE)+
+  scale_fill_viridis_c(limits = c(0, 70))+
+  labs(fill = "Number of chains", x = "Mean absolute deviance (pixels)", y = "Mean deviance (pixels)")+
+  facet_wrap(~Folder)+
+  theme_bw()+
+  theme(legend.position = "top")
+ggsave("figure/deviance_consistency.png", deviance.consistency.plot, dpi = 300, units = "mm", width = 170, height = 170)
+
+
+deviance.ratio.plot.data <- deviance.data %>%
+  dplyr::mutate(Class = case_when(DevianceRatio > 0.9 ~ "Perfect",
+                                  DevianceRatio < -0.9 ~ "Perfect",
+                                  .default = "Intermediate"))
+
+deviance.ratio.plot <- ggplot(deviance.ratio.plot.data, aes(x = Folder, y = DevianceRatio))+
+  geom_hline(yintercept = median(deviance.data$DevianceRatio))+
+  geom_violin()+
+  geom_boxplot(width=0.2, alpha=0)+
+  coord_cartesian()+
+  facet_wrap(~Class)+
   theme_bw()+
   theme(legend.position = "none")
-# ggsave("deviance_consistency.png", deviance.consistency.plot, dpi = 300, units = "mm", width = 85, height = 85)
+ggsave("figure/deviance_ratio.png", deviance.ratio.plot, dpi = 300, units = "mm", width = 170, height = 170)
 
 unassigned.stomata <- chain.distances %>%
   dplyr::ungroup() %>%
   dplyr::select(Folder, File, fUnassignedStomata) %>%
   dplyr::distinct()
 unass.plot <- ggplot(unassigned.stomata, aes(x=Folder, y=fUnassignedStomata))+
-  geom_beeswarm()+
+  geom_hline(yintercept = median(unassigned.stomata$fUnassignedStomata))+
+  geom_violin()+
+  geom_boxplot(width=0.2, alpha=0)+
   theme_bw()+
-  theme(axis.text.x = element_blank())
-
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+ggsave("figure/unass.plot.png", unass.plot, dpi = 300, units = "mm", width = 170, height = 170)
 
 overall.plot <- (dist.plot + deviance.plot )/ (deviance.consistency.plot +unass.plot) + plot_annotation(tag_levels = c("A"))
 ggsave("figure/output.png", overall.plot, dpi = 300, units = "mm", width = 170, height = 170)
