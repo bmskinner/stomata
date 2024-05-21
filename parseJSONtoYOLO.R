@@ -110,7 +110,7 @@ write.yolo.v8.bounds <- function(source.image.name){
 sapply(unique(out.data$imageName), write.yolo.v8.bounds)
 
 
-YOLO.MODEL <- "yolov8n"
+YOLO.MODEL <- "yolov8n" # try the tiny version of v9 once paper is published: likely "yolov9t"
 YOLO.YAML.FILE  <- paste0("stomata.", YOLO.MODEL, ".yaml")
 YOLO.PYTHON.FILE  <- paste0("stomata.", YOLO.MODEL, ".py")
 YOLO.PREDICT.FILE  <- paste0("stomata.", YOLO.MODEL, "_predict.py")
@@ -135,13 +135,13 @@ write_file(yolo.yaml, file = YOLO.YAML.FILE)
 yolo.python <- paste0(
 "from ultralytics import YOLO
 
-model = YOLO(\"", YOLO.MODEL, "\") # load a pretrained model
+model = YOLO(\"", YOLO.MODEL, ".pt\") # load a pretrained model
   
 results = model.train(
   data=\"", YOLO.YAML.FILE, "\",
   imgsz=1280,
-  epochs=100, 
-  batch=4, 
+  epochs=70, 
+  batch=8, 
   name=\"", YOLO.MODEL, "_stomata\"
 ) # train the model
 metrics = model.val() # evaluate model performance on the validation set
