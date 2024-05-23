@@ -6,38 +6,13 @@ library(jsonlite)
 library(tidyverse)
 library(magrittr)
 library(fs)
+source("functions.R")
 
 #### Detect CoM in json outline data ####
 
-# Read object borders from JSON
-get.border <- function(file){
-  data <- jsonlite::read_json(file)
-  shape.number = 1
-  process.shape <- function(shape){
-    if(shape$shape_type!="polygon")  return(NULL)
-    
-    bounds <- split(unlist(shape$points, recursive = T), 1:2) %>% as.data.frame
-    colnames(bounds) <- c("X", "Y")
-    result <- data.frame("shape" = shape.number,
-                         "x" = bounds$X,
-                         "y" = bounds$Y,
-                         "file" = file,
-                         "folder" = dirname(file),
-                         "imageName" = str_replace(basename(file), ".json", ".jpg"))
-    shape.number <<- shape.number+1
-    return(result)
-  }
-  
-  
-  do.call(rbind, lapply(data$shapes, process.shape)) %>% 
-    as.data.frame %>%
-    dplyr::mutate("imageWidth" = data$imageWidth,
-                  "imageHeight" = data$imageHeight)
-}
-
 files <- list.files(path = "stomatal_image", pattern = "*.json",  recursive = T, full.names = T)
 
-border.data <-  do.call(rbind, lapply(files, get.border))
+border.data <-  do.call(rbind, lapply(files, read.border.from.json))
 
 #### Split images to training and validation ####
 
@@ -281,7 +256,7 @@ write_file(paste0(
 from ultralytics import YOLO
 
 # Read the pretrained model
-model = YOLO(\"runs/detect/", YOLO.SEG.MODEL, "_stomata/weights/best.pt\")
+model = YOLO(\"runs/segment/", YOLO.SEG.MODEL, "_stomata/weights/best.pt\")
 
 # Test on the original validation group
 source = \"data/seg/images/val/*.jpg\"
@@ -291,14 +266,16 @@ results = model(source, stream=True, conf=0.05, imgsz=1280)  # generator of Resu
 
 # Process results generator
 with open(\"runs/segment/predict_seg/output.txt\", 'a') as f:
-  print(\"Image\\tx\\ty\\tw\\th\\tconf\", file=f)
+  print(\"Image\\tObject\\tx\\ty\", file=f)
   for result in results:
       out_path = result.path.replace(\"data/seg/images/val\", \"runs/segment/predict_seg\")
       result.save(filename=out_path, labels=False)  # save annotated image to disk
-
+      i=0 # track which object is which in output file
       for mask in result.masks:
-        xy = mask.xy.tolist()[0]
-        print(result.path, \"\\t\".join(xy), sep=\"\\t\", file=f)
+        xy = mask.xy[0]
+        for c in xy:
+          print(result.path, str(i), \"\\t\".join( map(str, c) ), sep=\"\\t\", file=f)
+        i+=1
         
 f.close()
 "  
@@ -343,9 +320,6 @@ write_file(paste0(
 #$ -e /home/bs19022/projects/stomata/runs/", YOLO.SEG.MODEL, ".train.txt
 
 source /usr/local/gpuallocation.sh
-# This is only needed once to create the conda env on a GPU node
-#conda create -y -n stomata ultralytics pytorch torchvision
-
 source activate stomata
 python ", YOLO.TRAIN.SEG.FILE, "
 conda deactivate
@@ -368,6 +342,7 @@ write_file(paste0(
 
 source /usr/local/gpuallocation.sh
 source activate stomata
+mkdir -p runs/detect/predict_bbox
 python ", YOLO.PREDICT.BBOX.FILE, "
 conda deactivate
 "
@@ -388,6 +363,7 @@ write_file(paste0(
 
 source /usr/local/gpuallocation.sh
 source activate stomata
+mkdir -p runs/segment/predict_seg
 python ", YOLO.PREDICT.SEG.FILE, "
 conda deactivate
 "
