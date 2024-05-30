@@ -1,17 +1,83 @@
 # common functions
+
+# Given two points in a list, return the leftmost (lowest x)
+left <- function(p1, p2){
+  if(p1$X<p2$X) return(p1)
+  else(return(p2))
+}
+# Given two in a list, return the rightmost (highest x)
+right <- function(p1, p2){
+  if(p1$X>=p2$X) return(p1)
+  else(return(p2))
+}
+# Given two in a list, return the upper (highest y)
+upper <- function(p1, p2){
+  if(p1$Y>p2$Y) return(p1)
+  else(return(p2))
+}
+# Given two in a list, return the lower (lowest y)
+lower <- function(p1, p2){
+  if(p1$Y<=p2$Y) return(p1)
+  else(return(p2))
+}
+
+# convert degrees to radians
+deg2rad <- function(deg)(deg * pi) / (180)
+
+# convert radians to degrees
+rad2deg <- function(rad) (180 * rad) / pi
+
+# Calculate the angle of line described by the given points to vertical
+# Returns angle in degrees anticlockwise. The line will start from the upper point
+angle.to.vertical <- function(x1, y1, x2, y2){
+  a = 0; # same x coords from vertical
+  b = 1; # arbitrary y offset
+  c = x2 - x1;
+  d = y2 - y1;
+  
+  atanA = atan2(a, b);
+  atanB = atan2(c, d);
+  
+  rad2deg(atanA-atanB)
+}
+
+# Calculate the angle of line described by the given points to the horizontal
+# Returns angle in degrees anticlockwise.
+angle.to.horizontal <- function(x1, y1, x2, y2){
+
+  a = 1; # same x coords from vertical
+  b = 0; # arbitrary y offset
+  c = x2 - x1;
+  d = y2 - y1;
+  
+  atanA = atan2(a, b);
+  atanB = atan2(c, d);
+  
+  rad2deg(atanA-atanB)
+}
+
+
 # Given a matrix containing X and Y columns constituting an object border, 
 # calculate the max feret diameter and return the points in the border that
 # lie at on this diameter
-find.max.feret.points <- function(points){
+calculate.stomata.orientation <- function(points){
   
   # calc pairwise distances for half the points
-  
   max.d <- 0
   p1 <- NA
   p2 <- NA
-  for(i in seq(1, ceiling(nrow(points)/2), 3)){
+  
+  half.border <- ceiling(nrow(points)/2)-1
+  # Assume halfway round the border indexes is halfway around the border
+  for(i in seq(1, half.border, 2)){
     
-    for(j in seq(floor(nrow(points)/2),  nrow(points)-1, 3)){
+    # vary the check for a few points around the half border
+    for(j in seq(i+half.border-5, i+half.border+5, 2)){
+      
+      if(j==i) next
+      
+      j <- max(1, j %% (nrow(points)))
+      
       d <- euclidean(points[i, "X"], points[i, "Y"], points[j, "X"], points[j, "Y"])
       if(d>max.d){
         max.d <- d
@@ -20,24 +86,17 @@ find.max.feret.points <- function(points){
       }
     }
   }
-  
-  
-  if(p1["X"] < p2["X"]){ p.min <- p1 } else { p.min <- p2}
-  p.max <- ifelse(p2 == p.min, p1, p2)
-  
-  # angle of max Feret relative to vertical in image
-  feretAngle <- LearnGeom::Angle(c(p.min["X"], p.min["Y"]+10), 
-                                 c(p.min["X"], p.min["Y"]),  
-                                 c(p.max["X"], p.max["Y"])) 
-  
-  list(max.d = max.d, 
-       p1 = sf::st_point(x = c(p.min["X"], p.min["Y"])),
-       p2 = sf::st_point(x = c(p.max["X"], p.max["Y"])),
-       angle = feretAngle)
+
+  list(max.feret = max.d, 
+       p1    = list(X = p1["X"], "Y"=p1["Y"]),
+       p2    = list(X = p2["X"], "Y"=p2["Y"]),
+       dx    = abs(p2["X"] - p1["X"]),
+       dy    = abs(p2["Y"] - p1["Y"]),
+       x.com = mean(points[,"X"]),
+       y.com = mean(points[,"Y"]))
 }
 
-# convert degrees to radians
-deg2rad <- function(deg)(deg * pi) / (180)
+
 
 # Find the maximum value in the density plot of the given vector
 find.mode <-  function(x) {
@@ -104,6 +163,10 @@ read.border.from.yolo <- function(file){
                                                    ymin, ymax, ymax, ymax, ymin), 
                                                  ncol=2, byrow=F)), .groups = 'drop')
     data$polygons <- lapply(polys$poly.matrix, function(x) sf::st_polygon(list(x)))
+    data$feret <- lapply(data$polygons, \(x) find.max.feret.points(sf::st_coordinates(x)))
+    data <- data %>%
+      tidyr::unnest_wider(feret)
+
     return(data %>% dplyr::select(-w, -h, -(xmin:ymax)))
     
   } else {
@@ -122,10 +185,10 @@ read.border.from.yolo <- function(file){
       dplyr::reframe(poly.matrix = list(matrix(c(x, x[1], y, y[1]), ncol=2, byrow=F)))
     data$polygons <- lapply(polys$poly.matrix, function(x) sf::st_polygon(list(x)))
     
-    # Find the max diameter points from the polygon
-    data$feret <- lapply(data$polygons, \(x) find.max.feret.points(sf::st_coordinates(x)))
-    data <- tidyr::unnest_wider(data, feret)
-    
+    # Find the max diameter points from the polygon and angles to vertical/horizontal
+    data$feret <- lapply(data$polygons, \(x) calculate.stomata.orientation(sf::st_coordinates(x)))
+    data <- data %>%
+      tidyr::unnest_wider(feret)
     return(data)
   }
   

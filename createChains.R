@@ -23,11 +23,9 @@ MIN.DISTANCE <- 100
 MAX.DISTANCE <- 500
 
 # Max angle difference from 180 degrees
-ANGLE.DELTA <- 15
+ANGLE.DELTA <- 30
 
 #### Functions #####
-
-
 
 # Give a file of stomata locations, create 1mers.
 # the input file can be in .json (AnyLabelling) format
@@ -74,6 +72,198 @@ read.1mers <- function(file){
   }
   
   mer1
+}
+
+save.plot <- function(plot, image.file, suffix){
+  out.path <- str_replace(image.file, ".jpg", suffix)
+  out.path <- str_replace(out.path, "data/seg/images/val/", "figure/")
+  ggsave(out.path, plot = plot, dpi = 300, units = "mm", width = 170, height = 140)
+  plot
+}
+
+plot.1mers <- function(mer.data){
+  img.grob <- rasterGrob(mer.data$img, interpolate=TRUE)
+  
+  # Don't show message about new coord system by creating it, then setting it as
+  # default before use
+  cf <- coord_fixed(xlim = c(0, dim(mer.data$img)[2]), ylim = c(0, dim(mer.data$img)[1]))
+  cf$default <- TRUE
+  
+  
+  stomata <- data.frame(
+    "x1" = sapply(mer.data$mer1$p1, \(p) p$X),
+    "y1" = sapply(mer.data$mer1$p1, \(p) p$Y),
+    "x2" = sapply(mer.data$mer1$p2, \(p) p$X),
+    "y2" = sapply(mer.data$mer1$p2, \(p) p$Y)
+  )
+  
+  
+  ggplot()+
+    # Draw the input image as a background
+    annotation_custom(img.grob, xmin=0, xmax=dim(mer.data$img)[2], 
+                      ymin=0, ymax=dim(mer.data$img)[1]) +
+    cf+
+    
+    # Draw the border polygons
+    geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6 )+
+    
+    # Draw the stomata points
+    geom_point(data =  stomata, aes(x=x1, y=y1), col = "blue")+
+    geom_point(data =  stomata, aes(x=x2, y=y2), col = "orange")+
+
+    # Write the angles of the 1mer
+    geom_text(data = mer.data$mer1, aes(x = x.com, y = y.com+20, label = sprintf("%.0f", abs.angle)), 
+              col = "red", size = 1.5)+
+    # geom_text(data = mer.data$mer1, aes(x = x.com, y = y.com-20, label = sprintf("%.0f", horzAngle)), 
+    #           col = "red", size = 1.5)+
+    
+    # Draw the name of each stomata
+    geom_text(data = mer.data$mer1,aes(x = x.com, y = y.com, label = stomata), col = "pink1", size = 2)+
+    
+    theme_bw()+
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(), 
+          axis.line = element_blank(),
+          axis.ticks = element_blank(),
+          panel.grid = element_blank(),
+          panel.border = element_blank()
+    )
+}
+
+
+plot.2mers <- function(mer.data){
+  img.grob <- rasterGrob(mer.data$img, interpolate=TRUE)
+  
+  # Don't show message about new coord system by creating it, then setting it as
+  # default before use
+  cf <- coord_fixed(xlim = c(0, dim(mer.data$img)[2]), ylim = c(0, dim(mer.data$img)[1]))
+  cf$default <- TRUE
+  
+  ggplot()+
+    # Draw the input image as a background
+    annotation_custom(img.grob, xmin=0, xmax=dim(mer.data$img)[2], 
+                      ymin=0, ymax=dim(mer.data$img)[1]) +
+    cf+
+    
+    # Draw the border polygons
+    geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6 )+
+    
+    # Draw the 2mer
+    geom_segment(data = mer.data$mer2, aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), 
+                 col="blue", linewidth = 0.5)+
+    
+    # Write the angle of the 2mer
+    geom_text(data = mer.data$mer2, aes( x = (S2.x+S1.x)/2, y = (S2.y+S1.y)/2, 
+                                         label = sprintf("%.0f", abs.angle)), 
+              col = "red", size = 3)+
+    
+    # Draw the centroid of each stomata in the 2mer
+    geom_point(data=mer.data$mer2, aes(x = S1.x, y = S1.y), col="blue", size=2)+
+    geom_point(data=mer.data$mer2, aes(x = S2.x, y = S2.y), col="orange", size=1)+
+    
+    # Draw the name of each stomata in the 2mer
+    geom_text(data = mer.data$mer2,aes(x = S1.x, y = S1.y, label = S1), col = "pink1", size = 2)+
+    geom_text(data = mer.data$mer2,aes(x = S2.x, y = S2.y, label = S2), col = "pink1", size = 2)+
+
+    theme_bw()+
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(), 
+          axis.line = element_blank(),
+          axis.ticks = element_blank(),
+          panel.grid = element_blank(),
+          panel.border = element_blank()
+    )
+}
+
+plot.3mers <- function(mer.data){
+  img.grob <- rasterGrob(mer.data$img, interpolate=TRUE)
+  
+  cf <- coord_fixed(xlim = c(0, dim(mer.data$img)[2]), ylim = c(0, dim(mer.data$img)[1]))
+  cf$default <- TRUE
+  
+  
+  ggplot()+
+    # Draw the input image as a background
+    annotation_custom(img.grob, xmin=0, xmax=dim(mer.data$img)[2], 
+                      ymin=0, ymax=dim(mer.data$img)[1]) +
+    cf+
+    
+    # Draw the border polygons
+    geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6 )+
+    
+    # Draw the centroid of each stomata
+    geom_point(data=mer.data$mer1, aes(x = x.com, y = y.com), col="black")+
+    
+    # Draw the 3mer
+    geom_segment(data=mer.data$mer3, aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), 
+                 col="blue", linewidth=1.5, alpha=0.8)+
+    geom_segment(data=mer.data$mer3, aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y), 
+                 col="orange", linewidth=0.5) +
+    geom_text(data = mer.data$mer3, aes( x = (S1.x+S2.x)/2, y = (S2.y+S1.y)/2, 
+                                         label = sprintf("%.0f", angle)), 
+              col = "red", size = 3)+
+    geom_text(data = mer.data$mer3,aes(x = S1.x, y = S1.y, label = S1), col = "pink1", size = 2)+
+    geom_text(data = mer.data$mer3,aes(x = S2.x, y = S2.y, label = S2), col = "pink1", size = 2)+
+    geom_text(data = mer.data$mer3,aes(x = S3.x, y = S3.y, label = S3), col = "pink1", size = 2)+
+    
+    theme_bw()+
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(), 
+          axis.line = element_blank(),
+          axis.ticks = element_blank(),
+          panel.grid = element_blank(),
+          panel.border = element_blank()
+    )
+}
+
+# plot contig data
+plot.contigs <- function(mer.data){
+  img.grob <- rasterGrob(mer.data$img, interpolate=TRUE)
+
+  cf <- coord_fixed(xlim = c(0, dim(mer.data$img)[2]), ylim = c(0, dim(mer.data$img)[1]))
+  cf$default <- TRUE
+  
+  # visualise the contigs
+  ggplot()+
+    # Draw the input image as a background
+    annotation_custom(img.grob, xmin=0, xmax=dim(mer.data$img)[2], 
+                      ymin=0, ymax=dim(mer.data$img)[1]) +
+    cf+
+    
+    # Draw the border polygons
+    geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6 )+
+    
+    geom_point(data = mer.data$contigs, aes(x = S1.x, y = S1.y, col = as.factor(Contig)), size=2)+
+    geom_point(data = mer.data$contigs, aes(x = S2.x, y = S2.y, col = as.factor(Contig)), size=2)+
+    geom_point(data = mer.data$contigs, aes(x = S3.x, y = S3.y, col = as.factor(Contig)), size=2)+
+    geom_segment(data = mer.data$contigs, aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, col = as.factor(Contig)), linewidth=1) +
+    geom_segment(data = mer.data$contigs, aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y, col = as.factor(Contig)), linewidth=1) +
+    labs(col = "Chain")+
+    theme_bw()+
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(), 
+          axis.line = element_blank(),
+          axis.ticks = element_blank(),
+          panel.grid = element_blank(),
+          panel.border = element_blank()
+    )
+}
+
+plot.rotated.contigs <- function(mer.data){
+  ggplot(mer.data$measured.contigs)+
+      geom_segment(aes(x = Contig.start.x, 
+                       y = Contig.start.y, 
+                       xend = RotatedContigEnd[,1], 
+                       yend = RotatedContigEnd[,2]), 
+                   col = "grey20")+
+      # geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), col = "grey")+
+      geom_segment(aes(x = RotatedS1[,1], y = RotatedS1[,2], xend = RotatedS2[,1], yend = RotatedS2[,2]), col = "blue")+
+      geom_point(aes(x = RotatedS1[,1], y = RotatedS1[,2]), col="blue", size=2)+
+      geom_point(aes(x = RotatedS2[,1], y = RotatedS2[,2]), col="blue", size=2)+
+      theme_bw()+
+      theme(axis.title = element_blank(),
+            panel.grid = element_blank(),
+            axis.ticks = element_blank())
 }
 
 
@@ -133,61 +323,435 @@ create.contigs <- function(mer.data){
     dplyr::mutate(Contig = map_int(merL, function(x) contig.numbers[names(contig.numbers)==x]))
 }
 
-# From a table of centres of mass, create 2mers
-# filter to those within a given distance of each other
-# and annotate with absolute angles on image
-create.2mers <- function(coms, min.distance, max.distance){
-  data <- expand.grid(coms$stomata, coms$stomata, stringsAsFactors = F) %>%
-    
+# From given 1-mers, create 2mers. filter to those within a given distance of
+# each other and annotate with absolute angles on image
+create.2mers <- function(mer.data, min.distance, max.distance){
+  
+  # Create all pairwise combinations of 1mers
+  result <- expand.grid(mer.data$mer1$stomata, mer.data$mer1$stomata, stringsAsFactors = F) %>%
     dplyr::distinct() %>% # remove duplicates
     dplyr::filter(Var1!=Var2) %>%
-    merge(., coms[,1:3], by.x = "Var1", by.y = "stomata", all.y = F) %>% # add coordinates for S1
+    merge(., mer.data$mer1[,c("stomata","x.com", "y.com")], by.x = "Var1", by.y = "stomata", all.y = F) %>% # add coordinates for S1
     dplyr::select(S1 = Var1, S1.x = x.com, S1.y = y.com, S2 = Var2) %>% # rename for clarity
-    merge(., coms[,1:3], by.x = "S2", by.y = "stomata", all.y = F) %>% # add coordinates for S2
-    dplyr::select(S1, S1.x, S1.y, S2, S2.x = x.com, S2.y = y.com) %>% # rename for clarity
-    
-    # now reorder S1 and S2 such that S1 is always to the left of S2
-    dplyr::rowwise() %>%
-    dplyr::mutate(S1t   = ifelse(S1.x < S2.x, S1, S2), 
-                  S1t.x = ifelse(S1.x < S2.x, S1.x, S2.x), 
-                  S1t.y = ifelse(S1.x < S2.x, S1.y, S2.y), 
-                  S2t   = ifelse(S1.x < S2.x, S2, S1),
-                  S2t.x = ifelse(S1.x < S2.x, S2.x, S1.x),
-                  S2t.y = ifelse(S1.x < S2.x, S2.y, S1.y)) %>% # ensure x asc order
-    dplyr::ungroup() %>%
-    dplyr::select(S1 = S1t, S1.x = S1t.x, S1.y = S1t.y,
-                  S2 = S2t, S2.x = S2t.x, S2.y = S2t.y) %>% # remove unused columns
-    dplyr::rowwise() %>%
-    dplyr::mutate(S1S2 = euclidean(S1.x, S1.y, S2.x, S2.y),
-                  kmer = paste0(S1, S2), 
-                  abs.angle = LearnGeom::Angle(c(S1.x, S1.y+10), c(S1.x,  S1.y),  c(S2.x,S2.y))) %>% # angle of 2mer relative to image
-    dplyr::filter(S1 != S2 &
-                    between(S1S2, min.distance, max.distance)) %>%
-    dplyr::distinct()
+    merge(., mer.data$mer1[,c("stomata","x.com", "y.com")], by.x = "S2", by.y = "stomata", all.y = F) %>% # add coordinates for S2
+    dplyr::select(S1, S1.x, S1.y, S2, S2.x = x.com, S2.y = y.com) # rename for clarity
   
-  if(nrow(data)>0){
-    data$mer2id <- 1:nrow(data)
+    
+  # Convert stomata CoMs to list of coordinates
+  result$S1.point <- mapply(\(x, y, n) list(X=x, Y=y, name=n), result$S1.x, result$S1.y, result$S1, SIMPLIFY = FALSE)
+  result$S2.point <- mapply(\(x, y, n) list(X=x, Y=y, name=n), result$S2.x, result$S2.y, result$S2, SIMPLIFY = FALSE)
+
+  choose.first <- function(p1, p2){
+    if(mer.data$modal.angle.type=="stomataAreHorizontal"){
+      return(left(p1, p2))
+    } else{
+      return(upper(p1, p2))
+    }
   }
-  return(data)
+  
+  choose.last <- function(p1, p2){
+    if(mer.data$modal.angle.type=="stomataAreHorizontal"){
+      return(right(p1, p2))
+    } else{
+      return(lower(p1, p2))
+    }
+  }
+  
+  result$Sf <- mapply(choose.first, result$S1.point, result$S2.point, SIMPLIFY = FALSE)
+  result$Sl <- mapply(choose.last,  result$S1.point, result$S2.point, SIMPLIFY = FALSE)
+  
+  result$abs.angle <- mapply( \(pf, pl) mer.data$angle.function(pl$X, pl$Y, pf$X, pf$Y),
+                              result$Sf,result$Sl)
+  
+  result$length <- mapply( \(p1, p2) euclidean(p1$X, p1$Y, p2$X, p2$Y), result$Sf,result$Sl)
+  
+  result$kmer =  mapply( \(p1, p2) paste0(p1$name, p2$name),result$Sf,result$Sl)
+  
+  result <- result %>%
+    # 
+    dplyr::select(Sf, Sl, length, abs.angle, kmer) %>%
+    unnest_wider(Sf) %>%
+    dplyr::rename(S1 = name, S1.x = X, S1.y = Y) %>%
+    unnest_wider(Sl) %>%
+    dplyr::rename(S2 = name, S2.x = X, S2.y = Y) %>%
+    dplyr::filter(S1 != S2 & between(length, min.distance, max.distance)) %>%
+    dplyr::distinct()
+
+  if(nrow(result)>0){
+    result$mer2id <- 1:nrow(result)
+  }
+  cat("Created", nrow(result), "2mers from", nrow(mer.data$mer1), "1mers\n")
+  return(result)
 }
 
-# From a table of 2mers, create 3mers. Filter to those within
-# an angle delta of 180 degrees
-create.3mers <- function(mer2){
-  merge(mer2, mer2, by.x = c("S2","S2.x", "S2.y" ), by.y = c("S1","S1.x", "S1.y" ), 
+# From given 2mers, create 3mers. Filter to those within an angle delta of 180
+# degrees
+create.3mers <- function(mer.data){
+  # Merge the 2mers
+  result <- merge(mer.data$mer2, mer.data$mer2, 
+        by.x = c("S2","S2.x", "S2.y" ), 
+        by.y = c("S1","S1.x", "S1.y" ), 
         all.y = F, suffixes = c("A", "B")) %>%
-    dplyr::select(S1, S1.x, S1.y, S2, S2.x, S2.y, S3 = S2B, S3.x = S2.xB, 
-                  S3.y = S2.yB, S1S2 = S1S2A, S2S3 = S1S2B, 
-                  S1S2.abs.angle = abs.angleA, S2S3.abs.angle = abs.angleB) %>% # rename for clarity
+    dplyr::select(S1, S1.x, S1.y, 
+                  S2, S2.x, S2.y, 
+                  S3 = S2B, S3.x = S2.xB, S3.y = S2.yB, 
+                  S1S2 = lengthA, S2S3 = lengthB, 
+                  S1S2.angle = abs.angleA, S2S3.angle = abs.angleB) %>% # rename for clarity
+   
+     # Calculate angle of 3mer. Check with stomata are top and bottom
     dplyr::rowwise() %>%
-    dplyr::mutate(angle = LearnGeom::Angle(c(S1.x,  S1.y), c(S2.x, S2.y), c(S3.x,S3.y)),
-                  abs.angle = LearnGeom::Angle(c(S1.x, S1.y+10), c(S1.x,  S1.y),  c(S3.x,S3.y))) %>% 
+    dplyr::mutate(
+      
+      # Mark which stomata is top and bottom for horizontal angle calcs
+      # S.bottom.x = ifelse(S1.y < S3.y, S1.x, S3.x),
+      # S.top.x = ifelse(S1.y < S3.y, S3.x, S1.x),
+      # S.bottom.y = ifelse(S1.y < S3.y, S1.y, S3.y),
+      # S.top.y =  ifelse(S1.y < S3.y, S3.y, S1.y),
+      
+      
+      # Internal angle of the 3mer (closeness to straight line)
+      angle = LearnGeom::Angle(c(S1.x,  S1.y), c(S2.x, S2.y), c(S3.x,S3.y)),
+      
+      # From crate.2mers we know that S1-S2-S3 is already ordered L-R or T-B
+      abs.angle = ifelse(mer.data$modal.angle.type=="vert",
+                         angle.to.vertical(S1.x,  S1.y, S3.x, S3.y),
+                         angle.to.horizontal(S3.x,  S3.y, S1.x, S1.y)
+                         # angle.to.horizontal(S.bottom.x, S.bottom.y, S.top.x, S.top.y)
+      )
+      ) %>% 
     dplyr::mutate(merL = paste0(S1, S2),
                   merR = paste0(S2, S3)) %>%
+    
+    # Remove the unused columns
+    # dplyr::select(-(S.bottom.x:S.top.y)) %>%
     dplyr::distinct()
+  
+  cat("Created", nrow(result), "3mers from", nrow(mer.data$mer2), "2mers\n")
+  result
 }
 
 #### Main function #####
+
+# Given YOLO 1mers read by read.1mers() for a single image, create contigs
+# The 1mers object should contain image, bounding polygon, and stomata orientation
+process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
+  
+  data <- list()
+  data$mer1 <- image.1mers
+  data$image.file <- unique(image.1mers$Image)
+  cat("Analysing", data$image.file, "\n")
+  
+  # Decide if absolute angles should be calculated from vertical or horizontal
+  find.best.angle.for.filtering <-function(){
+    dx = mean(data$mer1$dx)
+    dy = mean(data$mer1$dy)
+
+    if(dy<dx){
+      data$modal.angle.type <<- "stomataAreHorizontal"
+      data$angle.function <<- angle.to.vertical
+    } else {
+      data$modal.angle.type <<- "stomataAreVertical"
+      data$angle.function <<- angle.to.horizontal
+    }
+    
+    # Now we know the correct orientation for measuring, choose which points
+    # in each stomata should be used first and last in the calculations
+    data$choose.first <<- function(p1, p2){
+      if(data$modal.angle.type=="stomataAreHorizontal"){
+        return(left(p1, p2))
+      } else{
+        return(upper(p1, p2))
+      }
+    }
+    
+    data$choose.last <<- function(p1, p2){
+      if(data$modal.angle.type=="stomataAreHorizontal"){
+        return(right(p1, p2))
+      } else{
+        return(lower(p1, p2))
+      }
+    }
+    
+    p1 <- mapply(data$choose.first, data$mer1$p1, data$mer1$p2, SIMPLIFY = FALSE)
+    p2 <- mapply(data$choose.last, data$mer1$p1, data$mer1$p2, SIMPLIFY = FALSE)
+    
+    data$mer1$p1 <<- p1
+    data$mer1$p2 <<- p2
+    
+    # Calculate the stomata angle given the type of data
+    data$mer1$abs.angle <<- mapply(\(p1, p2) data$angle.function(p2$X, p2$Y, p1$X, p1$Y),
+                                   data$mer1$p1, data$mer1$p2, SIMPLIFY = TRUE)
+      
+      # sapply(1:nrow(data$mer1), \(i){
+      # data$angle.function(data$mer1$p2[[i]]["X"], data$mer1$p2[[i]]["Y"],
+      #                     data$mer1$p1[[i]]["X"], data$mer1$p1[[i]]["Y"])
+    # })
+    
+    data$modal.stomata.angle <<- find.mode(data$mer1$abs.angle)
+
+  }
+  find.best.angle.for.filtering()
+
+  # Read the image for making annotations
+  data$img <- OpenImageR::readImage(data$image.file)
+  data$img <- OpenImageR::flipImage(data$img, mode = "vertical") # to draw as expected
+  
+  if(write.debug.images) save.plot(plot.1mers(data), data$image.file, ".mer1.raw.png")
+  
+  data$mer2 <- create.2mers(data, min.distance = MIN.DISTANCE, max.distance = MAX.DISTANCE)
+
+  if(write.debug.images) save.plot(plot.2mers(data), data$image.file, ".mer2.raw.png")
+
+  # Filter the 2mers to the orientation of stomata in the image
+  # Which orientation do we expect? The stomata are oriented with their long
+  # diameter aligned with the chain. 2mers should be close to the modal
+  # stomata orientation.
+  filter.2mers.by.angle <- function(){
+    angle.tolerance <- 30
+    
+    filt <- data$mer2 %>% dplyr::filter(between(abs.angle, 
+                                        data$modal.stomata.angle - angle.tolerance, 
+                                        data$modal.stomata.angle + angle.tolerance))
+    
+    data$modal.mer2.angle <<- find.mode(filt$abs.angle)
+    
+    filt <- filt %>% dplyr::filter(between( abs.angle, 
+                                  data$modal.mer2.angle - angle.tolerance, 
+                                  data$modal.mer2.angle + angle.tolerance))
+    
+    cat("Filtered from", nrow(data$mer2), "to", nrow(filt), "2mers\n")
+    filt
+  }
+
+  data$mer2 <- filter.2mers.by.angle()
+  
+  # Filter 2mers intersecting a third stomata
+  filter.2mers.by.intersections <- function(){
+    # Remove edges in the graph that intersect a third stomata
+    # can use sf: https://stackoverflow.com/questions/61703791/determine-lines-that-intersect-a-polygon-in-r
+    # Create line objects
+    lines <- lapply(1:nrow(data$mer2), function(i) sf::st_linestring(rbind(c(data$mer2$S1.x[i], data$mer2$S1.y[i]),
+                                                                                     c(data$mer2$S2.x[i], data$mer2$S2.y[i]))) )
+    
+    # Check each 2mer for intersections with a stomata
+    # If we intersect, then this is not a valid 2mer
+    data$mer2$intersects <- lapply(lines, function(l) sum(unlist(sapply(data$mer1$polygons, sf::st_intersects, y=l))))
+    
+    filt <- data$mer2 %>% dplyr::filter(intersects <= 2)
+    
+    cat("Filtered from", nrow(data$mer2), "to", nrow(filt), "2mers\n")
+    
+    return(filt)
+  }
+  
+  data$mer2 <- filter.2mers.by.intersections()
+
+  if(write.debug.images)  save.plot(plot.2mers(data), data$image.file, ".mer2.filt.png")
+  
+  # Join the 2mers to create a 3mer chain
+  
+  # TODO: use vertical versus horizontal info for determining S1, S2, S3.
+  # OTherwise this will flip for vertical chains causing dropout of valid 3mers
+  data$mer3 <- create.3mers(data)
+  if(write.debug.images) save.plot(plot.3mers(data), data$image.file, ".mer3.raw.png")
+  
+  # Prune the 3mers. If two 3mers share a 2mer, keep the 3mer that is straightest
+  filter.3mers.by.straightness <- function(){
+    
+    filt <- data$mer3 %>% 
+      # First keep only the 3mers in straight lines
+      dplyr::filter( angle > 180 - ANGLE.DELTA)
+    
+    data$modal.mer3.angle <<- find.mode(filt$abs.angle)
+      
+    # angle.tolerance <- 20
+    # # Now keep only the 3mers that are at the modal angle
+    # filt <- filt %>% 
+    #   dplyr::filter( between(abs.angle, 
+    #                          data$modal.mer3.angle - angle.tolerance, 
+    #                          data$modal.mer3.angle + angle.tolerance))
+    # 
+    # 
+    # # Check the length of the 3mers - any jumping rows will be much longer
+    # data$mean.mer3.length <<- mean(filt$S1S2 + filt$S2S3) 
+    # filt <- filt %>% dplyr::filter(S1S2+S2S3 < (data$mean.mer3.length * 1.5))
+
+    filt <- filt %>%
+      # Look for 2mers present more than once
+      # Drop the 3mers with the lowest angle.
+      dplyr::group_by(merL) %>%
+      dplyr::arrange(merL, desc(angle)) %>%
+      dplyr::slice_head(n=1) %>%
+      dplyr::group_by(merR) %>%
+      dplyr::arrange(merR, desc(angle)) %>%
+      dplyr::slice_head(n=1)
+    
+    cat("Filtered from", nrow(data$mer3), "to", nrow(filt), "3mers\n")
+    filt
+  }
+  
+  data$mer3 <- filter.3mers.by.straightness()
+  if(write.debug.images) save.plot(plot.3mers(data), data$image.file,  ".mer3.straight.png")
+  
+  filter.3mers.by.branch <- function(){
+    # Pruning step - remove any kmers where the endpoint is in the middle of a chain
+    # to prevent branches
+    mer3.longer <- data$mer3 %>%
+      tidyr::pivot_longer(c(S1, S2, S3), names_to = "StomataPosition", values_to = "Stomata") %>%
+      dplyr::group_by(StomataPosition, Stomata) %>%
+      dplyr::mutate(abs.mer3.angle.diff = abs(data$modal.mer3.angle - abs.angle)) %>%
+      dplyr::arrange(StomataPosition, Stomata, abs.mer3.angle.diff) %>%
+      dplyr::slice_head(n=1) %>% # take only the 3mer closest to median angle
+      tidyr::pivot_wider(names_from = StomataPosition, values_from = Stomata) %>%
+      na.omit # remove the rows with NAs due to our slice
+    
+    
+    
+    cat("Filtered from", nrow(data$mer3), "to", nrow(mer3.longer), "3mers\n")
+    return(mer3.longer)
+  }
+  
+  data$mer3 <- filter.3mers.by.branch()
+  if(write.debug.images) save.plot(plot.3mers(data), data$image.file,  ".mer3.prune.png")
+  
+  filter.3mers.by.terminal <- function(){
+    # cat("Removing terminal branches\n")
+    # This still leaves branches when the endpoints meet a terminal kmer.
+    # Prune again - cases where the branch meets a terminal 2mer
+    # Look for 1mers that are are the S2 of 2 different 2mers
+    mer3.terminal <- data$mer3 %>%
+      tidyr::pivot_longer(c(merL, merR), names_to = "mer2Type", values_to = "mer2") %>%
+      dplyr::mutate(SL = ifelse(mer2Type == "merL", S1, S2),
+                    SR = ifelse(mer2Type == "merL", S2, S3)) %>%
+      dplyr::group_by(SL) %>%
+      dplyr::mutate(splits = paste(unique(SR), collapse = ""),
+                    nsplits = nchar(splits)) %>% # how many letters in combined mers
+      dplyr::group_by(splits) %>%
+      dplyr::arrange(splits, desc(angle)) %>% # order so the one to keep is top
+      dplyr::mutate(rownum = row_number()) %>% # scruffy; figure out which row in group
+      dplyr::filter(nsplits<=3 | rownum ==1) %>% # and keep the first from multi2mers
+      dplyr::ungroup() %>%
+      dplyr::select(-c(SL, SR, splits, nsplits, rownum)) %>%
+      tidyr::pivot_wider(names_from = "mer2Type", values_from = "mer2") %>%
+      na.omit
+    
+    # Now do the same for when the branch is at the start, not the end
+    
+    mer3.terminal <- mer3.terminal %>%
+      tidyr::pivot_longer(c(merL, merR), names_to = "mer2Type", values_to = "mer2") %>%
+      dplyr::mutate(SL = ifelse(mer2Type == "merL", S1, S2),
+                    SR = ifelse(mer2Type == "merL", S2, S3)) %>%
+      dplyr::group_by(SR) %>%
+      dplyr::mutate(splits = paste(unique(SL), collapse = ""),
+                    nsplits = nchar(splits)) %>% # how many letters in combined mers
+      dplyr::group_by(splits) %>%
+      dplyr::arrange(splits, desc(angle)) %>% # order so the one to keep is top
+      dplyr::mutate(rownum = row_number()) %>% # scruffy; figure out which row in group
+      dplyr::filter(nsplits<=3 | rownum ==1) %>% # and keep the first from multi2mers
+      dplyr::ungroup() %>%
+      dplyr::select(-c(SL, SR, splits, nsplits, rownum)) %>%
+      tidyr::pivot_wider(names_from = "mer2Type", values_from = "mer2") %>%
+      na.omit
+    
+    cat("Filtered from", nrow(data$mer3), "to", nrow(mer3.terminal), "3mers\n")
+    return(mer3.terminal)
+  }
+  data$mer3 <- filter.3mers.by.terminal()
+  if(write.debug.images) save.plot(plot.3mers(data), data$image.file,  ".mer3.terminal.png")
+  
+  
+  # Create contigs from the 3mers
+  data$contigs <- create.contigs(data$mer3) %>% 
+    dplyr::group_by(Contig)
+  
+  save.plot(plot.contigs(data), data$image.file, ".chains.png")
+  
+  measure.contigs <- function(){
+    # Match contigs to the 2mers they contain
+    contig.mer2 <- data$contigs %>% 
+      dplyr::select(Contig, merL, merR) %>%
+      tidyr::pivot_longer(c(merL, merR), values_to = "kmer") %>%
+      dplyr::select(Contig, kmer) %>%
+      dplyr::distinct() %>%
+      merge(., data$mer2, by= "kmer")
+    
+    # Calculate average distances per contig
+    # and angle variation within the contig
+    dist.contigs <- contig.mer2 %>%
+      dplyr::mutate(File  = data$image.file) %>%
+      dplyr::group_by(Contig) %>%
+
+      # Find the first and last stomata in the contig
+      dplyr::mutate(Contig.start.index = which.min(S1.x),
+                    Contig.start.x = S1.x[Contig.start.index],
+                    Contig.start.y = S1.y[Contig.start.index],
+                    Contig.end.index = which.max(S2.x),
+                    Contig.end.x = S2.x[Contig.end.index],
+                    Contig.end.y = S2.y[Contig.end.index]) %>%
+
+      # Calculate the absolute angle of the contig in the image against the vertical
+      # Use this to calculate the angle against the horizontal
+      dplyr::rowwise() %>%
+      dplyr::mutate(Contig.abs.angle =  angle.to.horizontal(Contig.start.x,  Contig.start.y,
+                                                            Contig.end.x, Contig.end.y),
+                    Contig.abs.length = euclidean(Contig.start.x, Contig.start.y, Contig.end.x, Contig.end.y),
+                    Contig.abs.angle.radians = -deg2rad(Contig.abs.angle),
+
+                    # Rotate the end of the contig about the contig start point
+                    RotatedContigEnd = autoimage::rotate(matrix(c(Contig.end.x, Contig.end.y), nrow=1),
+                                                         Contig.abs.angle.radians,
+                                                         pivot = c(Contig.start.x, Contig.start.y)),
+
+                    # Rotate the kmer coordinates about the contig start point
+                    RotatedS1 = autoimage::rotate(matrix(c(S1.x, S1.y), nrow=1),
+                                                  Contig.abs.angle.radians,
+                                                  pivot = c(Contig.start.x, Contig.start.y)),
+                    RotatedS2 = autoimage::rotate(matrix(c(S2.x, S2.y), nrow=1),
+                                                  Contig.abs.angle.radians,
+                                                  pivot = c(Contig.start.x, Contig.start.y))
+      ) %>%
+
+      # Calculate the deviation between the contig line and the individual points
+      dplyr::mutate(S1.deviance = RotatedS1[,2] - Contig.start.y,
+                    S2.deviance = RotatedS2[,2] - Contig.start.y) %>%
+
+      # Ensure no duplicate kmers
+      dplyr::select(-mer2id) %>%
+      dplyr::distinct()
+    # 
+    # How many stomata are not in a chain?
+    data$stomata.in.contigs <<- unique(c(data$contigs$S1, data$contigs$S2, data$contigs$S3))
+    data$stomata.unassigned <<- data$mer1$stomata[ !(data$mer1$stomata %in% data$stomata.in.contigs)]
+
+    data$nStomata <<- function() length(unique(data$mer1$stomata))
+    data$nUnassignedStomata <<- function() length(unique(data$stomata.unassigned))
+    data$fUnassignedStomata <<- function() length(unique(data$stomata.unassigned))/data$nStomata()
+
+    return(dist.contigs)
+  }
+  
+  data$measured.contigs <- measure.contigs()
+  
+  if(write.debug.images) save.plot(plot.rotated.contigs(data),  data$image.file, ".rotated.png")
+  data
+}
+
+yolo.data <- read.1mers("output.txt")
+
+make.test.data <- function(){
+  write.debug.images <<- TRUE
+  image.1mers <- yolo.data[yolo.data$Image==unique(yolo.data$Image)[208],]
+  image.1mers$Image <- gsub("/home/bs19022/projects/stomata/", "", image.1mers$Image)
+  image.1mers
+}
+
+image.1mers <- make.test.data()
+
+processed.data <- do.call(rbind, lapply(unique(yolo.data$Image)[1], \(x) {
+  sub.data <- yolo.data[yolo.data$Image==x,]
+  sub.data$Image <- gsub("/home/bs19022/projects/stomata/", "", sub.data$Image)
+  process.yolo.predictions(sub.data, write.debug.images=TRUE)$measured.contigs
+}))
 
 # Given a json file, extract the stomata and 
 # create linear chains
@@ -199,8 +763,6 @@ process.coordinate.file <- function(file){
   image <- str_replace(file, "json", "jpg")
   img <- OpenImageR::readImage(image)
   img <- OpenImageR::flipImage(img, mode = "vertical") # to draw as expected
-  
-
 
   
   plot.2mers <- function(mer.data){
@@ -253,36 +815,7 @@ process.coordinate.file <- function(file){
             panel.border = element_blank()
       )
   }
-  
-  # plot contig data
-  plot.contigs <- function(mer.contigs){
-    img.grob <- rasterGrob(img, interpolate=TRUE)
-    # visualise the contigs
-    ggplot(mer.contigs)+
-      annotation_custom(img.grob, xmin=0, xmax=dim(img)[2], ymin=0, ymax=dim(img)[1]) +
-      coord_fixed(xlim = c(0, dim(img)[2]), ylim = c(0, dim(img)[1]))+
-      geom_polygon(data = border.data, aes(x = x, y = y, group=shape), fill = "darkgreen", alpha=0.6)+
-      geom_point(aes(x = S1.x, y = S1.y, col = as.factor(Contig)), size=2)+
-      geom_point(aes(x = S2.x, y = S2.y, col = as.factor(Contig)), size=2)+
-      geom_point(aes(x = S3.x, y = S3.y, col = as.factor(Contig)), size=2)+
-      geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, col = as.factor(Contig)), linewidth=1) +
-      geom_segment(aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y, col = as.factor(Contig)), linewidth=1) +
-      labs(col = "Chain")+
-      theme_bw()+
-      theme(axis.title = element_blank(),
-            axis.text = element_blank(), 
-            axis.line = element_blank(),
-            axis.ticks = element_blank(),
-            panel.grid = element_blank(),
-            panel.border = element_blank()
-      )
-  }
-  
-  save.plot <- function(plot, filename){
-    ggsave(str_replace(file, ".json", filename), plot = plot, dpi = 300, units = "mm", width = 170, height = 140)
-    plot
-  }
-  
+
   cat("  Creating 1mers\n")
   mer1 <- read.1mers(file)
   
@@ -313,6 +846,7 @@ process.coordinate.file <- function(file){
                                                                          c(mer2$S2.x[i], mer2$S2.y[i]))) )
   
   # Check each 2mer for intersections with a stomata
+  # If we intersect, then this is not a valid 2mer
   mer2$intersects <- lapply(mer2$lines, function(l) sum(unlist(sapply(mer1$polygons, sf::st_intersects, y=l))))
   
   mer2.filt <- mer2 %>%
@@ -324,14 +858,40 @@ process.coordinate.file <- function(file){
     return(data.frame())
   }
   
-  # mer.2.drop.plot <- plot.2mers(mer2[!mer2.keep,], img, border.data)
-  # ggsave(str_replace(file, ".json", ".mer2.drop.png"), plot = mer.2.drop.plot, dpi = 300, units = "mm", width = 170, height = 140)
-  # 
+
   mer.2.filt.plot <- plot.2mers(mer2.filt)
   save.plot(mer.2.filt.plot, ".mer2.filt.png")
   
-  # TODO: remove the 2mers which are at a different angle to the stomata
-  # orientation (use the angle measurements from mer1)
+
+  # Filter the 2mers to the orientation of stomata in the image
+  # Which orientation do we expect? The stomata are oriented with their long
+  # diameter aligned with the chain. 2mers should be close to the modal
+  # stomata orientation.
+  filter.2mers.by.angle <- function(mer2){
+
+    sdVert = sd(mer1$vertAngle)
+    sdHorz = sd(mer1$horzAngle)
+    
+    if(sdVert<sdHorz){ # Use vertical 
+      expected.angle <- find.mode(mer1$vert.angle)
+      
+      return(mer2 %>% dplyr::filter(between(vert.angle, 
+                                     expected.angle - ANGLE.DELTA, 
+                                     expected.angle + ANGLE.DELTA)))
+      
+      
+    } else { # Use horizontal
+      expected.angle <- find.mode(mer1$horzAngle)
+      
+      return(mer2 %>% dplyr::filter(between(horz.angle, 
+                                            expected.angle - ANGLE.DELTA, 
+                                            expected.angle + ANGLE.DELTA)))
+    }
+
+  }
+
+  # cat("Filtering on angle\n")
+  mer2.filt <- filter.2mers.by.angle(mer2.filt)
   
   # Join the tables to create a 3-mer chain
   mer3 <- create.3mers(mer2.filt)
@@ -346,17 +906,7 @@ process.coordinate.file <- function(file){
   # Find the 3mers in straight lines
   mer3.straight <- mer3 %>% dplyr::filter( angle > 180 - ANGLE.DELTA)
   mer.3.straight.plot <- save.plot(plot.3mers(mer3.straight), ".mer3.straight.png")
-  
-  # cat("Filtering on angle\n")
-  
-  # Filter the straight 3mers to the most common orientation in the image
-  # TODO - this does not work when the 3mers are vertical. 
-  # Possible fix - find the mode on mer2 raw instead; seems more consistent
-  # Still not perfect - may need to look only at local maxima
-  modal.angle <- find.mode(mer2$abs.angle)
-  # modal.angle <- find.mode(mer3.straight$abs.angle)
-  mer3.filt <- mer3.straight %>% dplyr::filter(between(abs.angle, modal.angle - ANGLE.DELTA, modal.angle+ANGLE.DELTA))
-  # mer.3.filt.plot <- save.plot(plot.3mers(mer3.filt), ".mer3.filtered.png")
+
   
   if(nrow(mer3.filt)<=1){
     # return empty dist.contigs dataframe
