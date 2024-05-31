@@ -139,7 +139,7 @@ sapply(unique(border.data$imageName), write.yolo.v8.seg)
 
 #### Create scripts to train models and predict ####
 
-YOLO.BBOX.MODEL            <- "yolov8n" # try the tiny version of v9 once paper is published: likely "yolov9t"
+YOLO.BBOX.MODEL            <- "yolov8n" # try the nano version of v10 once available "yolov10n.pt"
 YOLO.BBOX.YAML.FILE        <- paste0("stomata.", YOLO.BBOX.MODEL, ".yaml")
 YOLO.TRAIN.BBOX.FILE       <- paste0("stomata.", YOLO.BBOX.MODEL, ".bbox.train.py")
 YOLO.PREDICT.BBOX.FILE     <- paste0("stomata.", YOLO.BBOX.MODEL, ".bbox.predict.py")
@@ -258,18 +258,18 @@ from ultralytics import YOLO
 # Read the pretrained model
 model = YOLO(\"runs/segment/", YOLO.SEG.MODEL, "_stomata/weights/best.pt\")
 
-# Test on the original validation group
-source = \"data/seg/images/val/*.jpg\"
+# Run on the complete image set
+source = \"stomatal_image/*/*.jpg\"
 
 # Run inference
 results = model(source, stream=True, conf=0.05, imgsz=1280)  # generator of Results objects
 
 # Process results generator
-with open(\"runs/segment/predict_seg/output.txt\", 'a') as f:
+with open(\"runs/segment/complete_data/output.txt\", 'a') as f:
   print(\"Image\\tObject\\tx\\ty\", file=f)
   for result in results:
-      out_path = result.path.replace(\"data/seg/images/val\", \"runs/segment/predict_seg\")
-      result.save(filename=out_path, labels=False)  # save annotated image to disk
+      # out_path = result.path.replace(\"data/seg/images/val\", \"runs/segment/predict_seg\")
+      # result.save(filename=out_path, labels=False)  # save annotated image to disk
       i=0 # track which object is which in output file
       for mask in result.masks:
         xy = mask.xy[0]

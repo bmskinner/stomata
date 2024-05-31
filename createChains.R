@@ -1,29 +1,15 @@
 # Create chains from point coordinates
 
 #### Imports #####
-library(jsonlite)
-library(tidyverse)
-library(magrittr)
-library(LearnGeom)
-library(text.alignment)
-library(igraph)
-library(grid)
-library(patchwork)
-library(OpenImageR)
-library(ggbeeswarm)
-library(autoimage)
-library(sf)
-library(patchwork)
-library(fs)
 source("functions.R")
 
 #### Constants #####
 # min and maximum distance between stomata
 MIN.DISTANCE <- 100
-MAX.DISTANCE <- 500
+MAX.DISTANCE <- 400
 
 # Max angle difference from 180 degrees
-ANGLE.DELTA <- 30
+ANGLE.DELTA <- 15
 
 #### Functions #####
 
@@ -233,11 +219,10 @@ plot.contigs <- function(mer.data){
     # Draw the border polygons
     geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6 )+
     
+    # Draw the 2mers in the chain
     geom_point(data = mer.data$contigs, aes(x = S1.x, y = S1.y, col = as.factor(Contig)), size=2)+
     geom_point(data = mer.data$contigs, aes(x = S2.x, y = S2.y, col = as.factor(Contig)), size=2)+
-    geom_point(data = mer.data$contigs, aes(x = S3.x, y = S3.y, col = as.factor(Contig)), size=2)+
     geom_segment(data = mer.data$contigs, aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, col = as.factor(Contig)), linewidth=1) +
-    geom_segment(data = mer.data$contigs, aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y, col = as.factor(Contig)), linewidth=1) +
     labs(col = "Chain")+
     theme_bw()+
     theme(axis.title = element_blank(),
@@ -292,35 +277,46 @@ create.debruijn.graph <- function(mer.data){
 
 # create contigs from kmers
 create.contigs <- function(mer.data){
-  if(nrow(mer.data)==0) return(mer.data %>% dplyr::mutate(Contig = list()))
+  if(nrow(mer.data$mer3)==0) return(mer.data$mer3 %>% dplyr::mutate(Contig = list()))
   
-  g <- create.debruijn.graph(mer.data)
-  
-  # Visualise the graph
-  layout <- layout_with_kk(g)
-  # plot(g, layout = layout)
+  g <- create.debruijn.graph(mer.data$mer3)
   
   # Decompose unlinked contigs
   gphs <- decompose.graph(g)
   
   # Get the number of the contig each 2mer belongs to
   get.contig.number <- function(i){
-    # cat("    Getting contig", i, "\n")
     gph <- gphs[[i]]
     contig <- vertex_attr(gph, "kmer")
     contig.num <- rep(i, length(contig))
     names(contig.num) <- contig
-    # cat("    Contig", i, "is",contig.num, "\n")
-    # cat("    Contig", i, ": ",names(contig.num), "\n")
-    # cat("    Contig", i, ": ",str(contig.num), "\n")
     contig.num
   }
   
-  # cat("  Graph has", length(gphs), "contigs\n")
+  # Assign each contig a number
   contig.numbers <- do.call(c, lapply(1:length(gphs), get.contig.number))
-  
-  mer.data %>%
+  result <- mer.data$mer3 %>%
     dplyr::mutate(Contig = map_int(merL, function(x) contig.numbers[names(contig.numbers)==x]))
+  
+  # Keep only the list of 2mers belonging to each contig
+  result <- result %>% dplyr::select(Contig, merL, merR, Contig) %>%
+    tidyr::pivot_longer(c(merL, merR), names_to = "kmer_type", values_to = "kmer") %>%
+    dplyr::select(Contig, kmer)
+
+  # What about leftover 2mers that should be in chains? Even more stringent
+  # angle filter to get only those that are on the correct orientation
+  remaining.2mers <- mer.data$mer2 %>%
+    dplyr::filter(!(kmer %in% result$kmer)) %>%
+    dplyr::filter( between(abs.angle, mer.data$modal.mer2.angle - 5,
+                           mer.data$modal.mer2.angle + 5)) %>%
+    dplyr::mutate(Contig = max(result$Contig)+row_number()) %>%
+    dplyr::select(Contig, kmer)
+  
+  result <- rbind(result, remaining.2mers)
+  
+  merge(result, mer.data$mer2, all.y = FALSE, by = "kmer")
+                   
+  # return(result)
 }
 
 # From given 1-mers, create 2mers. filter to those within a given distance of
@@ -440,6 +436,27 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
   data$mer1 <- image.1mers
   data$image.file <- unique(image.1mers$Image)
   cat("Analysing", data$image.file, "\n")
+
+  # Check for overlapping objects and keep only the object with highest
+  # circularity
+  filter.1mers.for.overlaps <- function(){
+    
+    # Look for stomata with centroids closer than 50% of the median stomata diameter
+    stomata.avg.diameter <- median(data$mer1$max.feret)/2
+    coms <- dplyr::select(data$mer1, stomata, x.com, y.com, circularity)
+    distances <- expand.grid(s1 = data$mer1$stomata, s2 = data$mer1$stomata, 
+                             stringsAsFactors = FALSE) %>%
+      dplyr::filter(s1!=s2) %>%
+      merge(., data$mer1, by.x = "s1", by.y = "stomata") %>%
+      merge(., data$mer1, by.x = "s2", by.y = "stomata") %>%
+      dplyr::mutate(d1d2 = euclidean(x.com.x, y.com.x, x.com.y, y.com.y)) %>%
+      dplyr::filter(d1d2 < stomata.avg.diameter) %>%
+      dplyr::select(s1, s2, circularity.x, circularity.y) %>%
+      dplyr::mutate(toRemove = ifelse(circularity.x<circularity.y, s1, s2))
+
+    data$mer1 <<- data$mer1[!(data$mer1$stomata %in% distances$toRemove),]
+  }
+  filter.1mers.for.overlaps()
   
   # Decide if absolute angles should be calculated from vertical or horizontal
   find.best.angle.for.filtering <-function(){
@@ -507,7 +524,7 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
   # diameter aligned with the chain. 2mers should be close to the modal
   # stomata orientation.
   filter.2mers.by.angle <- function(){
-    angle.tolerance <- 30
+    angle.tolerance <- 20
     
     filt <- data$mer2 %>% dplyr::filter(between(abs.angle, 
                                         data$modal.stomata.angle - angle.tolerance, 
@@ -549,9 +566,6 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
   if(write.debug.images)  save.plot(plot.2mers(data), data$image.file, ".mer2.filt.png")
   
   # Join the 2mers to create a 3mer chain
-  
-  # TODO: use vertical versus horizontal info for determining S1, S2, S3.
-  # OTherwise this will flip for vertical chains causing dropout of valid 3mers
   data$mer3 <- create.3mers(data)
   if(write.debug.images) save.plot(plot.3mers(data), data$image.file, ".mer3.raw.png")
   
@@ -615,10 +629,10 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
   if(write.debug.images) save.plot(plot.3mers(data), data$image.file,  ".mer3.prune.png")
   
   filter.3mers.by.terminal <- function(){
-    # cat("Removing terminal branches\n")
     # This still leaves branches when the endpoints meet a terminal kmer.
     # Prune again - cases where the branch meets a terminal 2mer
     # Look for 1mers that are are the S2 of 2 different 2mers
+    # TODO: does this need refactor with top/bottom vs left right?
     mer3.terminal <- data$mer3 %>%
       tidyr::pivot_longer(c(merL, merR), names_to = "mer2Type", values_to = "mer2") %>%
       dplyr::mutate(SL = ifelse(mer2Type == "merL", S1, S2),
@@ -661,23 +675,15 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
   
   
   # Create contigs from the 3mers
-  data$contigs <- create.contigs(data$mer3) %>% 
+  data$contigs <- create.contigs(data) %>% 
     dplyr::group_by(Contig)
   
   save.plot(plot.contigs(data), data$image.file, ".chains.png")
   
   measure.contigs <- function(){
-    # Match contigs to the 2mers they contain
-    contig.mer2 <- data$contigs %>% 
-      dplyr::select(Contig, merL, merR) %>%
-      tidyr::pivot_longer(c(merL, merR), values_to = "kmer") %>%
-      dplyr::select(Contig, kmer) %>%
-      dplyr::distinct() %>%
-      merge(., data$mer2, by= "kmer")
-    
     # Calculate average distances per contig
     # and angle variation within the contig
-    dist.contigs <- contig.mer2 %>%
+    dist.contigs <- data$contigs %>%
       dplyr::mutate(File  = data$image.file) %>%
       dplyr::group_by(Contig) %>%
 
@@ -720,7 +726,7 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
       dplyr::distinct()
     # 
     # How many stomata are not in a chain?
-    data$stomata.in.contigs <<- unique(c(data$contigs$S1, data$contigs$S2, data$contigs$S3))
+    data$stomata.in.contigs <<- unique(c(data$contigs$S1, data$contigs$S2))
     data$stomata.unassigned <<- data$mer1$stomata[ !(data$mer1$stomata %in% data$stomata.in.contigs)]
 
     data$nStomata <<- function() length(unique(data$mer1$stomata))
@@ -738,20 +744,24 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
 
 yolo.data <- read.1mers("output.txt")
 
-make.test.data <- function(){
-  write.debug.images <<- TRUE
-  image.1mers <- yolo.data[yolo.data$Image==unique(yolo.data$Image)[208],]
-  image.1mers$Image <- gsub("/home/bs19022/projects/stomata/", "", image.1mers$Image)
-  image.1mers
-}
+# make.test.data <- function(){
+#   write.debug.images <<- TRUE
+#   image.1mers <- yolo.data[yolo.data$Image==unique(yolo.data$Image)[208],]
+#   image.1mers$Image <- gsub("/home/bs19022/projects/stomata/", "", image.1mers$Image)
+#   image.1mers
+# }
+# 
+# image.1mers <- make.test.data()
 
-image.1mers <- make.test.data()
-
-processed.data <- do.call(rbind, lapply(unique(yolo.data$Image)[1], \(x) {
+processed.data <- lapply(unique(yolo.data$Image), \(x) {
   sub.data <- yolo.data[yolo.data$Image==x,]
   sub.data$Image <- gsub("/home/bs19022/projects/stomata/", "", sub.data$Image)
-  process.yolo.predictions(sub.data, write.debug.images=TRUE)$measured.contigs
-}))
+  process.yolo.predictions(sub.data, write.debug.images=FALSE)
+})
+saveRDS(processed.data, "chain.distances.Rds")
+
+
+#### Old function #####
 
 # Given a json file, extract the stomata and 
 # create linear chains
@@ -920,7 +930,6 @@ process.coordinate.file <- function(file){
   # Pruning step
   # Look for 2mers present more than once
   # Drop the 3mers with the lowest angle.
-  # TODO
   mer3.pruned <- mer3.filt %>% 
     dplyr::group_by(merL) %>%
     dplyr::arrange(merL, desc(angle)) %>%

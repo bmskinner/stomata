@@ -1,4 +1,19 @@
 # common functions
+library(jsonlite)
+library(tidyverse)
+library(magrittr)
+library(LearnGeom)
+library(text.alignment)
+library(igraph)
+library(grid)
+library(patchwork)
+library(OpenImageR)
+library(ggbeeswarm)
+library(autoimage)
+library(sf)
+library(patchwork)
+library(fs)
+library(lwgeom)
 
 # Given two points in a list, return the leftmost (lowest x)
 left <- function(p1, p2){
@@ -184,11 +199,26 @@ read.border.from.yolo <- function(file){
       dplyr::group_by(Image, Object) %>%
       dplyr::reframe(poly.matrix = list(matrix(c(x, x[1], y, y[1]), ncol=2, byrow=F)))
     data$polygons <- lapply(polys$poly.matrix, function(x) sf::st_polygon(list(x)))
+    # data$area     <- sapply(data$polygons, \(x) sf::st_area(x))
     
     # Find the max diameter points from the polygon and angles to vertical/horizontal
     data$feret <- lapply(data$polygons, \(x) calculate.stomata.orientation(sf::st_coordinates(x)))
     data <- data %>%
-      tidyr::unnest_wider(feret)
+      tidyr::unnest_wider(feret) %>%
+      dplyr::rowwise() %>%
+      dplyr::mutate(area      = sf::st_area(polygons),
+                    perimeter = sf::st_perimeter(polygons),
+                    circularity = 4 * pi * area / perimeter^2  # 4*pi*A/P^2?
+                    )
+      
+    # Remove objects that are too small or too irregular to be stomata
+    min.area <- median(data$area)/2
+    max.area <-  median(data$area)*2
+    min.circ <- min(0.5, median(data$circularity)/2)
+    data <- data %>%
+      dplyr::filter( between(area, min.area, max.area) & circularity > min.circ)
+
+    
     return(data)
   }
   
