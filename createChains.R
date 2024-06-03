@@ -60,13 +60,6 @@ read.1mers <- function(file){
   mer1
 }
 
-save.plot <- function(plot, image.file, suffix){
-  out.path <- str_replace(image.file, ".jpg", suffix)
-  out.path <- str_replace(out.path, "data/seg/images/val/", "figure/")
-  ggsave(out.path, plot = plot, dpi = 300, units = "mm", width = 170, height = 140)
-  plot
-}
-
 plot.1mers <- function(mer.data){
   img.grob <- rasterGrob(mer.data$img, interpolate=TRUE)
   
@@ -254,14 +247,14 @@ plot.rotated.contigs <- function(mer.data){
 
 # create a deBruijn graph from kmers
 create.debruijn.graph <- function(mer.data){
-  uks <- unique(c(mer.data$merL, mer.data$merR)) # unique 2mers
+  uks <- unique(c(mer.data$merFirst, mer.data$merLast)) # unique 2mers
   if(length(uks)==0)
     return(make_empty_graph())
   # 
   # # Assign an id to each kmer
   k.index <- function(kmer) which(uks==kmer)
-  mer.data$merLid <- sapply(mer.data$merL, k.index)
-  mer.data$merRid <- sapply(mer.data$merR, k.index)
+  mer.data$merLid <- sapply(mer.data$merFirst, k.index)
+  mer.data$merRid <- sapply(mer.data$merLast, k.index)
   
   # Make a deBruijn graph from kmers
   g <- make_empty_graph()
@@ -296,11 +289,11 @@ create.contigs <- function(mer.data){
   # Assign each contig a number
   contig.numbers <- do.call(c, lapply(1:length(gphs), get.contig.number))
   result <- mer.data$mer3 %>%
-    dplyr::mutate(Contig = map_int(merL, function(x) contig.numbers[names(contig.numbers)==x]))
+    dplyr::mutate(Contig = map_int(merFirst, function(x) contig.numbers[names(contig.numbers)==x]))
   
   # Keep only the list of 2mers belonging to each contig
-  result <- result %>% dplyr::select(Contig, merL, merR, Contig) %>%
-    tidyr::pivot_longer(c(merL, merR), names_to = "kmer_type", values_to = "kmer") %>%
+  result <- result %>% dplyr::select(Contig, merFirst, merLast, Contig) %>%
+    tidyr::pivot_longer(c(merFirst, merLast), names_to = "kmer_type", values_to = "kmer") %>%
     dplyr::select(Contig, kmer)
 
   # What about leftover 2mers that should be in chains? Even more stringent
@@ -397,14 +390,7 @@ create.3mers <- function(mer.data){
      # Calculate angle of 3mer. Check with stomata are top and bottom
     dplyr::rowwise() %>%
     dplyr::mutate(
-      
-      # Mark which stomata is top and bottom for horizontal angle calcs
-      # S.bottom.x = ifelse(S1.y < S3.y, S1.x, S3.x),
-      # S.top.x = ifelse(S1.y < S3.y, S3.x, S1.x),
-      # S.bottom.y = ifelse(S1.y < S3.y, S1.y, S3.y),
-      # S.top.y =  ifelse(S1.y < S3.y, S3.y, S1.y),
-      
-      
+
       # Internal angle of the 3mer (closeness to straight line)
       angle = LearnGeom::Angle(c(S1.x,  S1.y), c(S2.x, S2.y), c(S3.x,S3.y)),
       
@@ -415,11 +401,10 @@ create.3mers <- function(mer.data){
                          # angle.to.horizontal(S.bottom.x, S.bottom.y, S.top.x, S.top.y)
       )
       ) %>% 
-    dplyr::mutate(merL = paste0(S1, S2),
-                  merR = paste0(S2, S3)) %>%
+    dplyr::mutate(merFirst = paste0(S1, S2),
+                  merLast  = paste0(S2, S3)) %>%
     
     # Remove the unused columns
-    # dplyr::select(-(S.bottom.x:S.top.y)) %>%
     dplyr::distinct()
   
   cat("Created", nrow(result), "3mers from", nrow(mer.data$mer2), "2mers\n")
@@ -430,7 +415,7 @@ create.3mers <- function(mer.data){
 
 # Given YOLO 1mers read by read.1mers() for a single image, create contigs
 # The 1mers object should contain image, bounding polygon, and stomata orientation
-process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
+process.yolo.predictions <- function(image.1mers, write.chain.image = FALSE, write.debug.images=FALSE){
   
   data <- list()
   data$mer1 <- image.1mers
@@ -510,6 +495,7 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
   find.best.angle.for.filtering()
 
   # Read the image for making annotations
+  if(!file.exists(data$image.file)) stop(paste("The image file", data$image.file,"was not found"))
   data$img <- OpenImageR::readImage(data$image.file)
   data$img <- OpenImageR::flipImage(data$img, mode = "vertical") # to draw as expected
   
@@ -593,11 +579,11 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
     filt <- filt %>%
       # Look for 2mers present more than once
       # Drop the 3mers with the lowest angle.
-      dplyr::group_by(merL) %>%
-      dplyr::arrange(merL, desc(angle)) %>%
+      dplyr::group_by(merFirst) %>%
+      dplyr::arrange(merFirst, desc(angle)) %>%
       dplyr::slice_head(n=1) %>%
-      dplyr::group_by(merR) %>%
-      dplyr::arrange(merR, desc(angle)) %>%
+      dplyr::group_by(merLast) %>%
+      dplyr::arrange(merLast, desc(angle)) %>%
       dplyr::slice_head(n=1)
     
     cat("Filtered from", nrow(data$mer3), "to", nrow(filt), "3mers\n")
@@ -634,36 +620,38 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
     # Look for 1mers that are are the S2 of 2 different 2mers
     # TODO: does this need refactor with top/bottom vs left right?
     mer3.terminal <- data$mer3 %>%
-      tidyr::pivot_longer(c(merL, merR), names_to = "mer2Type", values_to = "mer2") %>%
-      dplyr::mutate(SL = ifelse(mer2Type == "merL", S1, S2),
-                    SR = ifelse(mer2Type == "merL", S2, S3)) %>%
-      dplyr::group_by(SL) %>%
-      dplyr::mutate(splits = paste(unique(SR), collapse = ""),
-                    nsplits = nchar(splits)) %>% # how many letters in combined mers
-      dplyr::group_by(splits) %>%
-      dplyr::arrange(splits, desc(angle)) %>% # order so the one to keep is top
+      tidyr::pivot_longer(c(merFirst, merLast), names_to = "mer2Type", values_to = "mer2") %>%
+      dplyr::mutate(StomataFirst = ifelse(mer2Type == "merFirst", S1, S2),
+                    StomataLast  = ifelse(mer2Type == "merFirst", S2, S3)) %>%
+      dplyr::group_by(StomataFirst) %>% # Take all the starting stomata of the 3mer
+      dplyr::mutate(CharactersPerStomata = nchar(StomataLast), # how many letters in a stomata id
+                    AllConnectedStomata = paste(unique(StomataLast), collapse = ""), # make a string of all stomata in a 2mer with the last stomata
+                    NumberOfConnectedStomata = nchar(AllConnectedStomata)/CharactersPerStomata) %>% # how many stomata join this
+      dplyr::group_by(AllConnectedStomata) %>%
+      dplyr::arrange(AllConnectedStomata, desc(angle)) %>% # order so the one to keep is top
       dplyr::mutate(rownum = row_number()) %>% # scruffy; figure out which row in group
-      dplyr::filter(nsplits<=3 | rownum ==1) %>% # and keep the first from multi2mers
+      dplyr::filter(NumberOfConnectedStomata==1 | rownum==1) %>% # keep the first from multi2mers, or every row from unique 2mers
       dplyr::ungroup() %>%
-      dplyr::select(-c(SL, SR, splits, nsplits, rownum)) %>%
+      dplyr::select(-c(StomataFirst, StomataLast, AllConnectedStomata, CharactersPerStomata, NumberOfConnectedStomata, rownum)) %>%
       tidyr::pivot_wider(names_from = "mer2Type", values_from = "mer2") %>%
       na.omit
     
     # Now do the same for when the branch is at the start, not the end
     
     mer3.terminal <- mer3.terminal %>%
-      tidyr::pivot_longer(c(merL, merR), names_to = "mer2Type", values_to = "mer2") %>%
-      dplyr::mutate(SL = ifelse(mer2Type == "merL", S1, S2),
-                    SR = ifelse(mer2Type == "merL", S2, S3)) %>%
-      dplyr::group_by(SR) %>%
-      dplyr::mutate(splits = paste(unique(SL), collapse = ""),
-                    nsplits = nchar(splits)) %>% # how many letters in combined mers
-      dplyr::group_by(splits) %>%
-      dplyr::arrange(splits, desc(angle)) %>% # order so the one to keep is top
+      tidyr::pivot_longer(c(merFirst, merLast), names_to = "mer2Type", values_to = "mer2") %>%
+      dplyr::mutate(StomataFirst = ifelse(mer2Type == "merFirst", S1, S2),
+                    StomataLast  = ifelse(mer2Type == "merFirst", S2, S3)) %>%
+      dplyr::group_by(StomataLast) %>%
+      dplyr::mutate(CharactersPerStomata = nchar(StomataFirst), # how many letters in a stomata id
+                    AllConnectedStomata = paste(unique(StomataFirst), collapse = ""), # make a string of all stomata in a 2mer with the last stomata
+                    NumberOfConnectedStomata = nchar(AllConnectedStomata)/CharactersPerStomata) %>% # how many stomata join this
+      dplyr::group_by(AllConnectedStomata) %>%
+      dplyr::arrange(AllConnectedStomata, desc(angle)) %>% # order so the one to keep is top
       dplyr::mutate(rownum = row_number()) %>% # scruffy; figure out which row in group
-      dplyr::filter(nsplits<=3 | rownum ==1) %>% # and keep the first from multi2mers
+      dplyr::filter(NumberOfConnectedStomata==1 | rownum==1) %>% # keep the first from multi2mers, or every row from unique 2mers
       dplyr::ungroup() %>%
-      dplyr::select(-c(SL, SR, splits, nsplits, rownum)) %>%
+      dplyr::select(-c(StomataFirst, StomataLast, AllConnectedStomata, CharactersPerStomata, NumberOfConnectedStomata, rownum)) %>%
       tidyr::pivot_wider(names_from = "mer2Type", values_from = "mer2") %>%
       na.omit
     
@@ -675,10 +663,12 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
   
   
   # Create contigs from the 3mers
-  data$contigs <- create.contigs(data) %>% 
-    dplyr::group_by(Contig)
+  data$contigs <- create.contigs(data) %>%
+    dplyr::mutate(Image = data$image.file, 
+                  Folder = basename(dirname(Image)),
+                  File   = basename(Image))
   
-  save.plot(plot.contigs(data), data$image.file, ".chains.png")
+  if(write.chain.image) save.plot(plot.contigs(data), data$image.file, ".chains.png")
   
   measure.contigs <- function(){
     # Calculate average distances per contig
@@ -693,7 +683,8 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
                     Contig.start.y = S1.y[Contig.start.index],
                     Contig.end.index = which.max(S2.x),
                     Contig.end.x = S2.x[Contig.end.index],
-                    Contig.end.y = S2.y[Contig.end.index]) %>%
+                    Contig.end.y = S2.y[Contig.end.index],
+                    n.stomata.in.contig = n()) %>%
 
       # Calculate the absolute angle of the contig in the image against the vertical
       # Use this to calculate the angle against the horizontal
@@ -724,7 +715,7 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
       # Ensure no duplicate kmers
       dplyr::select(-mer2id) %>%
       dplyr::distinct()
-    # 
+
     # How many stomata are not in a chain?
     data$stomata.in.contigs <<- unique(c(data$contigs$S1, data$contigs$S2))
     data$stomata.unassigned <<- data$mer1$stomata[ !(data$mer1$stomata %in% data$stomata.in.contigs)]
@@ -738,28 +729,78 @@ process.yolo.predictions <- function(image.1mers, write.debug.images=FALSE){
   
   data$measured.contigs <- measure.contigs()
   
+  data$metadata <- data.frame(Image              = data$image.file,
+                              File               = basename(data$image.file),
+                              Folder             = basename(dirname(data$image.file)),
+                              nStomata           = data$nStomata(),
+                              nUnassignedStomata = data$nUnassignedStomata(),
+                              fUnassignedStomata = data$fUnassignedStomata(),
+                              nContigs           = length(unique(data$measured.contigs$Contig))
+  )
+  
   if(write.debug.images) save.plot(plot.rotated.contigs(data),  data$image.file, ".rotated.png")
   data
 }
 
-yolo.data <- read.1mers("output.txt")
+
+#### Run the analysis ####
+fs::dir_create("analysis")
+
+# The complete YOLO output is too large to process in one go - split to a single
+# output file per input image
+split.yolo.output.to.single.image.files <- function(file){
+  border.data <- readr::read_tsv(file, col_names = TRUE, progress = FALSE, 
+                                 col_types = cols()) %>% 
+    dplyr::group_by(Image) %>%
+    dplyr::mutate(Folder = basename(dirname(Image)),
+                  File   = basename(Image)) %>%
+    dplyr::group_by(Folder) %>%
+    dplyr::group_walk(~ fs::dir_create(path = fs::path("analysis", .y$Folder))) %>%
+    dplyr::group_by(Folder, File) %>%
+    dplyr::group_walk(~ write_tsv(.x, file = fs::path("analysis", .y$Folder, .y$File, ext = "tsv" )))
+}
+# split.yolo.output.to.single.image.files("output.txt")
+
 
 # make.test.data <- function(){
 #   write.debug.images <<- TRUE
-#   image.1mers <- yolo.data[yolo.data$Image==unique(yolo.data$Image)[208],]
-#   image.1mers$Image <- gsub("/home/bs19022/projects/stomata/", "", image.1mers$Image)
+#   write.chain.image <<- TRUE
+#   image.1mers <-  read.1mers(input.yolo.files[1]) %>%
+#     dplyr::mutate(Image  = str_replace(Image, "/home/bs19022/projects/stomata/", ""),
+#                   Folder = basename(dirname(Image)),
+#                   File   = basename(Image))
 #   image.1mers
 # }
 # 
 # image.1mers <- make.test.data()
 
-processed.data <- lapply(unique(yolo.data$Image), \(x) {
-  sub.data <- yolo.data[yolo.data$Image==x,]
-  sub.data$Image <- gsub("/home/bs19022/projects/stomata/", "", sub.data$Image)
-  process.yolo.predictions(sub.data, write.debug.images=FALSE)
-})
-saveRDS(processed.data, "chain.distances.Rds")
+# Read the split YOLO files that contain border info for a single image each
+# Serialise the detected chains for later use
+input.yolo.files <- list.files(path="analysis", pattern = "*.tsv", include.dirs = TRUE, full.names = TRUE, recursive = TRUE)
 
+
+process.image.file <- function(image.file){
+  rds.output <- gsub("tsv", "Rds", image.file)
+  if(file.exists(rds.output)) return() # skip any already done
+  
+  yolo.data <- read.1mers(image.file) %>%
+    dplyr::mutate(Image  = str_replace(Image, "/home/bs19022/projects/stomata/", ""),
+                  Folder = basename(dirname(Image)),
+                  File   = basename(Image))
+  
+  processed.data <- suppressWarnings(process.yolo.predictions(yolo.data,
+                                                              write.chain.image = FALSE,  
+                                                              write.debug.images= FALSE))
+  
+  # The entire dataset is too large to save at scale and mostly not needed
+  output <- list("contigs"     = processed.data$contigs,
+                 "measurments" = processed.data$measured.contigs,
+                 "metadata"    = processed.data$metadata)
+  
+  saveRDS(output, rds.output)
+}
+
+parallelsugar::mclapply(input.yolo.files, process.image.file, mc.cores = 4)
 
 #### Old function #####
 
@@ -931,11 +972,11 @@ process.coordinate.file <- function(file){
   # Look for 2mers present more than once
   # Drop the 3mers with the lowest angle.
   mer3.pruned <- mer3.filt %>% 
-    dplyr::group_by(merL) %>%
-    dplyr::arrange(merL, desc(angle)) %>%
+    dplyr::group_by(merFirst) %>%
+    dplyr::arrange(merFirst, desc(angle)) %>%
     dplyr::slice_head(n=1) %>%
-    dplyr::group_by(merR) %>%
-    dplyr::arrange(merR, desc(angle)) %>%
+    dplyr::group_by(merLast) %>%
+    dplyr::arrange(merLast, desc(angle)) %>%
     dplyr::slice_head(n=1)
   
   # Pruning step - remove any kmers where the endpoint is in the middle of a chain
@@ -963,9 +1004,9 @@ process.coordinate.file <- function(file){
   # Prune again - cases where the branch meets a terminal 2mer
   # Look for 1mers that are are the S2 of 2 different 2mers
   mer3.terminal <- mer3.longer %>%
-    tidyr::pivot_longer(c(merL, merR), names_to = "mer2Type", values_to = "mer2") %>%
-    dplyr::mutate(SL = ifelse(mer2Type == "merL", S1, S2),
-                  SR = ifelse(mer2Type == "merL", S2, S3)) %>%
+    tidyr::pivot_longer(c(merFirst, merLast), names_to = "mer2Type", values_to = "mer2") %>%
+    dplyr::mutate(SL = ifelse(mer2Type == "merFirst", S1, S2),
+                  SR = ifelse(mer2Type == "merFirst", S2, S3)) %>%
     dplyr::group_by(SL) %>%
     dplyr::mutate(splits = paste(unique(SR), collapse = ""),
                   nsplits = nchar(splits)) %>% # how many letters in combined mers
@@ -981,9 +1022,9 @@ process.coordinate.file <- function(file){
   # Now do the same for when the branch is at the start, not the end
   
   mer3.terminal <- mer3.terminal %>%
-    tidyr::pivot_longer(c(merL, merR), names_to = "mer2Type", values_to = "mer2") %>%
-    dplyr::mutate(SL = ifelse(mer2Type == "merL", S1, S2),
-                  SR = ifelse(mer2Type == "merL", S2, S3)) %>%
+    tidyr::pivot_longer(c(merFirst, merLast), names_to = "mer2Type", values_to = "mer2") %>%
+    dplyr::mutate(SL = ifelse(mer2Type == "merFirst", S1, S2),
+                  SR = ifelse(mer2Type == "merFirst", S2, S3)) %>%
     dplyr::group_by(SR) %>%
     dplyr::mutate(splits = paste(unique(SL), collapse = ""),
                   nsplits = nchar(splits)) %>% # how many letters in combined mers
@@ -1027,8 +1068,8 @@ process.coordinate.file <- function(file){
   chain.plot <- save.plot(plot.contigs(short.contigs), ".chains.png")
   
   # Match contigs to the 2mers they contain
-  contig.assignment <- short.contigs %>% dplyr::select(Contig, merL, merR) %>%
-    tidyr::pivot_longer(c(merL, merR), values_to = "kmer") %>%
+  contig.assignment <- short.contigs %>% dplyr::select(Contig, merFirst, merLast) %>%
+    tidyr::pivot_longer(c(merFirst, merLast), values_to = "kmer") %>%
     dplyr::select(Contig, kmer) %>%
     dplyr::distinct() %>%
     merge(., mer2, by= "kmer")

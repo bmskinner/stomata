@@ -14,6 +14,23 @@ library(sf)
 library(patchwork)
 library(fs)
 library(lwgeom)
+library(parallel)
+library(parallelsugar) # github 'nathanvan/parallelsugar', provides windows mclapply
+
+# Save the given plot to the given path
+save.ggplot <- function(plot, out.file, width = 170, height = 85){
+  ggsave(out.file, plot = plot, dpi = 300, units = "mm", width = width, height = height)
+}
+
+# Save the given plot to the given path and return the plot
+save.plot <- function(plot, image.file, suffix, width = 170, height = 85){
+  out.path <- str_replace(image.file, ".jpg", suffix)
+  out.path <- str_replace(out.path, "/", "_")
+  out.path <- paste0("figure/", out.path)
+  save.ggplot(out.file = out.path, plot = plot, width = width, height = height)
+  plot
+}
+
 
 # Given two points in a list, return the leftmost (lowest x)
 left <- function(p1, p2){
@@ -111,14 +128,11 @@ calculate.stomata.orientation <- function(points){
        y.com = mean(points[,"Y"]))
 }
 
-
-
 # Find the maximum value in the density plot of the given vector
 find.mode <-  function(x) {
   d <- density(x)
   d$x[which.max(d$y)]
 }
-
 
 # Calculate distance between two points
 euclidean <- function(x1, y1, x2, y2) sqrt( (x1-x2)^2 + (y1-y2)^2)
@@ -189,36 +203,38 @@ read.border.from.yolo <- function(file){
     cat("Reading YOLO segment mask\n")
     data <- border.data %>%
       dplyr::group_by(Image, Object) %>%
-      dplyr::mutate(stomata  = paste0("s", sprintf("%02d", Object))) %>%
+      dplyr::mutate(stomata  = paste0("s", sprintf("%03d", Object))) %>%
       dplyr::ungroup() %>%
       dplyr::select(Image, stomata) %>%
       dplyr::distinct()
     
     # Create polygons from border
+    cat("Creating polygons from segment mask\n")
     polys <- border.data %>% 
       dplyr::group_by(Image, Object) %>%
       dplyr::reframe(poly.matrix = list(matrix(c(x, x[1], y, y[1]), ncol=2, byrow=F)))
     data$polygons <- lapply(polys$poly.matrix, function(x) sf::st_polygon(list(x)))
-    # data$area     <- sapply(data$polygons, \(x) sf::st_area(x))
     
     # Find the max diameter points from the polygon and angles to vertical/horizontal
+    cat("Finding stomata orientations\n")
     data$feret <- lapply(data$polygons, \(x) calculate.stomata.orientation(sf::st_coordinates(x)))
     data <- data %>%
       tidyr::unnest_wider(feret) %>%
       dplyr::rowwise() %>%
       dplyr::mutate(area      = sf::st_area(polygons),
                     perimeter = sf::st_perimeter(polygons),
-                    circularity = 4 * pi * area / perimeter^2  # 4*pi*A/P^2?
+                    circularity = 4 * pi * area / perimeter^2
                     )
       
     # Remove objects that are too small or too irregular to be stomata
     min.area <- median(data$area)/2
-    max.area <-  median(data$area)*2
+    max.area <- median(data$area)*2
     min.circ <- min(0.5, median(data$circularity)/2)
     data <- data %>%
-      dplyr::filter( between(area, min.area, max.area) & circularity > min.circ)
+      dplyr::filter( between(area, min.area, max.area) & circularity > min.circ) %>%
+      dplyr::mutate(Folder = dirname(Image),
+                    File   = basename(Image))
 
-    
     return(data)
   }
   
