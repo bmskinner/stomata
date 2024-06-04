@@ -153,6 +153,8 @@ YOLO.PREDICT.SEG.FILE     <- paste0("stomata.", YOLO.SEG.MODEL, ".seg.predict.py
 YOLO.TRAIN.SEG.WRAPPER    <- paste0("stomata.", YOLO.SEG.MODEL, ".seg.train.sh")
 YOLO.PREDICT.SEG.WRAPPER  <- paste0("stomata.", YOLO.SEG.MODEL, ".seg.predict.sh")
 
+OUTPUT.DIR                <- "runs/segment/single_file"
+
 # Create YOLO bbox training YAML
 write_file(paste0(
   "path: /home/bs19022/projects/stomata/data/bbox\n",
@@ -253,6 +255,8 @@ f.close()
 # Script to predict seg based on val data
 write_file(paste0(
   "import cv2
+import numpy as np
+import os
 from ultralytics import YOLO
 
 # Read the pretrained model
@@ -265,19 +269,32 @@ source = \"stomatal_image/*/*.jpg\"
 results = model(source, stream=True, conf=0.05, imgsz=1280)  # generator of Results objects
 
 # Process results generator
-with open(\"runs/segment/complete_data/output.txt\", 'a') as f:
-  print(\"Image\\tObject\\tx\\ty\", file=f)
-  for result in results:
-      # out_path = result.path.replace(\"data/seg/images/val\", \"runs/segment/predict_seg\")
-      # result.save(filename=out_path, labels=False)  # save annotated image to disk
-      i=0 # track which object is which in output file
-      for mask in result.masks:
-        xy = mask.xy[0]
-        for c in xy:
-          print(result.path, str(i), \"\\t\".join( map(str, c) ), sep=\"\\t\", file=f)
-        i+=1
-        
-f.close()
+for result in results:
+
+  # Output file paths
+  mask_image_path = \"",OUTPUT.DIR,"/\" + os.path.basename(result.path) + \".png\"
+  mask_coord_path = \"",OUTPUT.DIR,"/\" + os.path.basename(result.path) + \".txt\"
+  
+  mask_data = result.cpu().masks.data
+  img = (mask_data[0].numpy() * 255).astype(\"uint8\")
+
+  height,width = img.shape
+    
+  masked = np.zeros((height, width), dtype=\"uint8\")
+  num_masks = len(mask_data)
+  for i in range(num_masks):
+    masked = cv2.add(masked, cv2.min((mask_data[i].numpy() * 255).astype(\"uint8\"), 255))
+  cv2.imwrite(mask_image_path, masked)
+
+  with open(mask_coord_path, 'a') as f:
+    print(\"Image\\tObject\\tx\\ty\", file=f)
+    i=0 # track which object is which in output file
+    for mask in result.masks:
+      xy = mask.xy[0]
+      for c in xy:
+        print(result.path, str(i), \"\\t\".join( map(str, c) ), sep=\"\\t\", file=f)
+      i+=1
+    f.close()
 "  
 ), file = YOLO.PREDICT.SEG.FILE)
 
@@ -363,7 +380,7 @@ write_file(paste0(
 
 source /usr/local/gpuallocation.sh
 source activate stomata
-mkdir -p runs/segment/predict_seg
+mkdir -p ", OUTPUT.DIR, "
 python ", YOLO.PREDICT.SEG.FILE, "
 conda deactivate
 "
