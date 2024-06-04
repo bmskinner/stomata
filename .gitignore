@@ -8,6 +8,7 @@
 *.pyc
 *.tiff
 *.png
+*.tsv
 .Rhistory
 .Rproj.user
 *.Rproj
