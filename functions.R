@@ -240,3 +240,24 @@ read.border.from.yolo <- function(file){
   
   
 }
+
+
+# Calculate the g function for an image
+# image.data - a data.frame with columns for x and y coordinates of the CoM of objects to measure
+# image the image file
+g.function <- function(com.data, image.file.name){
+  # Calculate neighbour distances
+  d <- dist(com.data)
+  dm <- as.matrix(d)
+  diag(dm) <- NA
+  dmin <- apply(dm, 1, min, na.rm=TRUE)
+  
+  # get the unique distances (for the x-axis)
+  distance <- sort(unique(round(dmin)))
+  # compute how many cases there with distances smaller that each x
+  Gd <- sapply(distance, function(x) sum(dmin < x))
+  # normalize to get values between 0 and 1
+  Gd <- Gd / length(dmin)
+  
+  data.frame(distance, Gd, Image = image.file.name)
+}

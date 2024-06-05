@@ -24,6 +24,15 @@ cat(sum(chain.metadata$nStomata), "stomata analysed\n")
 
 #### Basic summary info ####
 
+# How many images per folder?
+save.ggplot(ggplot(chain.metadata %>% dplyr::group_by(Folder) %>% dplyr::summarise(n = n()), aes(x=Folder, y = n))+
+              geom_col()+
+              labs(y = "Images per folder")+
+              theme_bw()+
+              theme(axis.text.x = element_text(angle = 45, hjust=1)),
+            "figure/Images_per_folder.png")
+
+
 # How many contigs per image?
 save.ggplot(ggplot(chain.metadata, aes(x=Folder, y = nContigs))+
               geom_hline(yintercept = median(chain.metadata$nContigs))+
@@ -136,3 +145,56 @@ save.ggplot(ggplot(deviance.data, aes(x = MeanAbsDeviance, y = MeanDeviance))+
               theme_bw()+
               theme(legend.position = "top"),
             "figure/Deviance_consistency.png")
+
+#### G-function analysis ####
+
+# Run the g-function on each image
+# Get the CoMs of each stomata
+coms <- chain.contigs %>% dplyr::select(S = S1 , x = S1.x, y= S1.y, Image, Folder, File)
+coms <- rbind (coms, chain.contigs %>% dplyr::select(S = S2 , x = S2.x, y= S2.y, Image, Folder, File))
+coms %<>% dplyr::distinct()
+
+g.results <- do.call(rbind, lapply(unique(coms$Image), function(i) g.function(as.matrix(coms[coms$Image==i, c("x", "y")]), i)))
+
+g.results$Folder <- basename(dirname(g.results$Image))
+
+# Plot the per-file plots
+save.ggplot(ggplot(g.results, aes(x=distance, y=Gd, group=Image))+
+  geom_line(data =g.results[,c("distance", "Gd", "Image")], col="grey", alpha = 0.1)+
+  geom_line(col="blue", alpha = 0.1)+
+  labs(x = "Distance between stomata", y = "Cumulative fraction")+
+  facet_wrap(~Folder )+
+  theme_bw(),
+  "figure/G-function.png", height = 170)
+
+# What is the mean value for each folder?
+# Linear interpolation of per-file curve to consistent spacing
+
+windows <- as.data.frame(IRanges(start = seq(40, 400, by = 10), # vector of window start positions
+                end   = seq(50, 410, by = 10)))
+
+calc.mean <- function(start, end){
+  do.call(rbind, lapply(unique(g.results$Folder), function(folder){
+    subset.data <- g.results[g.results$Folder==folder & g.results$distance > start & g.results$distance <= end,]
+    data.frame(start = start, end = end, Gd = mean(subset.data$Gd), Gd.sd = sd(subset.data$Gd), Folder = folder, distance = (start+end)/2)
+  }))
+}
+
+g.summary <- do.call(rbind, mapply(calc.mean, windows$start, windows$end, SIMPLIFY = FALSE))
+
+save.ggplot(ggplot(g.summary, aes(x=distance, y=Gd))+
+  geom_line(data=g.results[,c("distance", "Gd", "Image")], aes(group=Image), col="grey", alpha = 0.1)+
+  geom_line(data=g.results, aes(group=Image), col="lightblue", alpha = 0.3)+
+  geom_line(col="blue")+
+  labs(x = "Distance between stomata", y = "Cumulative fraction")+
+  facet_wrap(~Folder )+
+  theme_bw(),
+  "figure/G-function_complete.png", height = 170)
+
+save.ggplot(ggplot(g.summary, aes(x=distance, y=Gd, col = Folder))+
+  geom_line()+
+  labs(x = "Distance between stomata", y = "Cumulative fraction")+
+  theme_bw()+
+    theme(legend.position = "top"),
+  "figure/G-function_summary.png", height = 170)
+

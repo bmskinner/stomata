@@ -272,20 +272,28 @@ results = model(source, stream=True, conf=0.05, imgsz=1280)  # generator of Resu
 for result in results:
 
   # Output file paths
-  mask_image_path = \"",OUTPUT.DIR,"/\" + os.path.basename(result.path) + \".png\"
-  mask_coord_path = \"",OUTPUT.DIR,"/\" + os.path.basename(result.path) + \".txt\"
+  out_dir = os.path.basename(os.path.dirname(result.path))
+  out_file = os.path.basename(result.path)
+  
+  out_base = os.path.join(\"",OUTPUT.DIR,"\",out_dir)
+  os.makedirs(out_base, exist_ok=True)
+  
+  mask_image_path = os.path.join(out_base, out_file + \".png\")
+  mask_coord_path = os.path.join(out_base, out_file + \".txt\")
   
   mask_data = result.cpu().masks.data
   img = (mask_data[0].numpy() * 255).astype(\"uint8\")
 
   height,width = img.shape
-    
+  
+  # Combine all masks to one image
   masked = np.zeros((height, width), dtype=\"uint8\")
   num_masks = len(mask_data)
   for i in range(num_masks):
     masked = cv2.add(masked, cv2.min((mask_data[i].numpy() * 255).astype(\"uint8\"), 255))
   cv2.imwrite(mask_image_path, masked)
 
+  # Write the marks coordinates
   with open(mask_coord_path, 'a') as f:
     print(\"Image\\tObject\\tx\\ty\", file=f)
     i=0 # track which object is which in output file
