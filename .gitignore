@@ -6,4 +6,16 @@
 *.zip
 *.pyc
 *.tiff
+*.png
+*.tsv
 .Rhistory
+.Rproj.user
+*.Rproj
+*.Rds
+*.Rdata*
+.Rprofile
+stomatal*/*
+using_anylabelling/*
+figure/*
+data/*
+
