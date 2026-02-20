@@ -8,6 +8,12 @@
 *.tiff
 *.png
 *.tsv
+*.nmd
+*.txt
+*.pdf
+*.html
+*.tar
+*.gz
 .Rhistory
 .Rproj.user
 *.Rproj
