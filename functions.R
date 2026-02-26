@@ -35,66 +35,117 @@ save.plot <- function(plot, image.file, suffix, width = 253.8, height = 190.05) 
 
 
 # Given two points in a list, return the leftmost (lowest x)
+#
+# p1 - a list with named elements X and Y
+# p2 - a list with named elements X and Y
+#
+# Returns: the point with the lower X value
 left <- function(p1, p2) {
-  if (p1$X < p2$X) {
+  if (p1[["X"]] < p2[["X"]]) {
     return(p1)
   } else {
-    (return(p2))
+    return(p2)
   }
 }
 # Given two points in a list, return the rightmost (highest x)
 #
-# p1 - a list with named elements x and y
-# p2 - a list with named elements x and y
+# p1 - a list with named elements X and Y
+# p2 - a list with named elements X and Y
+#
+# Returns: the point with the higher X value
 right <- function(p1, p2) {
-  if (p1$X >= p2$X) {
+  if (p1[["X"]] >= p2[["X"]]) {
     return(p1)
   } else {
-    (return(p2))
+    return(p2)
   }
 }
 # Given two points in a list, return the upper (highest y)
 #
-# p1 - a list with named elements x and y
-# p2 - a list with named elements x and y
+# p1 - a list with named elements X and Y
+# p2 - a list with named elements X and Y
+#
+# Returns: the point with the higher Y value
 upper <- function(p1, p2) {
-  if (p1$Y > p2$Y) {
+  if (p1[["Y"]] > p2[["Y"]]) {
     return(p1)
   } else {
-    (return(p2))
+    return(p2)
   }
 }
 # Given two in a list, return the lower (lowest y)
 #
-# p1 - a list with named elements x and y
-# p2 - a list with named elements x and y
+# p1 - a list with named elements X and Y
+# p2 - a list with named elements X and Y
+#
+# Returns: the point with the lower Y value
 lower <- function(p1, p2) {
-  if (p1$Y <= p2$Y) {
+  if (p1[["Y"]] <= p2[["Y"]]) {
     return(p1)
   } else {
-    (return(p2))
+    return(p2)
   }
 }
 
 # convert degrees to radians
+#
+# deg - the angle in degrees
+#
+# Returns: the angle in radians
 deg2rad <- function(deg) (deg * pi) / (180)
 
 # convert radians to degrees
+#
+# rad - the angle in radians
+#
+# Returns: the angle in degrees
 rad2deg <- function(rad) (180 * rad) / pi
+
+# Calculate the angle between two lines. Each line is defined by two points.
+#
+# l1.p1 - a point on line 1; a list with 'X' and 'Y' elements
+# l1.p2- a point on line 1; a list with 'X' and 'Y' elements
+# l2.p1 - a point on line 2; a list with 'X' and 'Y' elements
+# l2.p2 - a point on line 2; a list with 'X' and 'Y' elements
+#
+# Returns: the absolute angle between the lines in degrees
+angle.between.lines <- function(l1.p1, l1.p2, l2.p1, l2.p2) {
+  l1.pl <- left(l1.p1, l1.p2)
+  l1.pr <- right(l1.p1, l1.p2)
+
+  l2.pl <- left(l2.p1, l2.p2)
+  l2.pr <- right(l2.p1, l2.p2)
+
+  a <- l1.pr[["X"]] - l1.pl[["X"]] # l1 x diff
+  b <- l1.pr[["Y"]] - l1.pl[["Y"]] # l1 y diff
+
+  c <- l2.pr[["X"]] - l2.pl[["X"]] # l2 x difference
+  d <- l2.pr[["Y"]] - l2.pl[["Y"]] # l2 y difference
+
+  atanA <- atan2(a, b)
+  atanB <- atan2(c, d)
+
+  return(rad2deg(atanA - atanB))
+}
+
 
 # Calculate the angle of line described by the given points to vertical
 # Returns angle in degrees anticlockwise. The line will start from the upper point
 angle.to.vertical <- function(x1, y1, x2, y2) {
-  a <- 0 # same x coords from vertical
-  b <- 1 # arbitrary y offset
-  c <- x2 - x1
-  d <- y2 - y1
+  # L1 is the vertical axis
+  a <- 0 # l1 x diff - same x coords from vertical
+  b <- 1 # l1 y diff -arbitrary y offset
+
+  # L2 is the line we input
+  c <- x2 - x1 # l2 x difference
+  d <- y2 - y1 # l2 y difference
 
   atanA <- atan2(a, b)
   atanB <- atan2(c, d)
 
   rad2deg(atanA - atanB)
 }
+
 
 # Calculate the angle of line described by the given points to the horizontal
 # Returns angle in degrees anticlockwise.
@@ -114,38 +165,105 @@ angle.to.horizontal <- function(x1, y1, x2, y2) {
 # identify the longest axis and return points that lie run on this axis through
 # the centre of mass
 calculate.bounding.box.orientation.points <- function(points) {
-  # Get the CoM of the object. Marker points should align to this point.
+  # Get the CoM of the object.
   x.com <- mean(points[, "X"])
   y.com <- mean(points[, "Y"])
+
+  #   axis12
+  #  1 ----- 2
+  #  |       |  axis14
+  #  |       |
+  #  4-------3
 
   p1 <- points[1, ]
   p2 <- points[2, ]
   p3 <- points[3, ]
   p4 <- points[4, ]
 
-  # What are the lengths of the two axes in the rectangle?
+  # Create axes for the OBB border and the diagonals
+  axis.12 <- sf::st_linestring(matrix(
+    data = c(p1["X"], p1["Y"], p2["X"], p2["Y"]),
+    byrow = TRUE, nrow = 2, ncol = 2
+  ))
+  axis.14 <- sf::st_linestring(matrix(
+    data = c(p1["X"], p1["Y"], p4["X"], p4["Y"]),
+    byrow = TRUE, nrow = 2, ncol = 2
+  ))
 
-  axis1 <- euclidean(p1["X"], p1["Y"], p2["X"], p2["Y"])
-  axis2 <- euclidean(p1["X"], p1["Y"], p4["X"], p4["Y"])
+  diagonal.13 <- sf::st_linestring(matrix(
+    data = c(p1["X"], p1["Y"], p3["X"], p3["Y"]),
+    byrow = TRUE, nrow = 2, ncol = 2
+  ))
+  diagonal.24 <- sf::st_linestring(matrix(
+    data = c(p2["X"], p2["Y"], p4["X"], p4["Y"]),
+    byrow = TRUE, nrow = 2, ncol = 2
+  ))
 
-  # Select the points lying on the longer axis
-  pA <- p1
+  # What are the lengths of the axes in the rectangle?
+  axis.12.length <- sf::st_length(axis.12)
+  axis.14.length <- sf::st_length(axis.14)
 
-  if (axis1 > axis2) {
-    pB <- p2
+  axis.13.length <- sf::st_length(diagonal.13)
+  axis.24.length <- sf::st_length(diagonal.24)
+
+  # The longest axis is mostly likely the general orientation of the stomata
+  if (axis.12.length > axis.14.length) {
+    long.axis <- axis.12
+    short.axis <- axis.14
   } else {
+    long.axis <- axis.14
+    short.axis <- axis.12
+  }
+  cat(long.axis, "\n")
+
+
+  # Calculate the angle between the longest axis and the two possible
+  # diagonals. We assume that one of the diagonals is the desired orientation.
+
+  # Which diagonal has the lowest angle to the long OBB axis?
+  angle.to.diagonal.1 <- angle.between.lines(
+    c("X" = long.axis[1], "Y" = long.axis[3]),
+    c("X" = long.axis[2], "Y" = long.axis[4]),
+    c("X" = diagonal.13[1], "Y" = diagonal.13[3]),
+    c("X" = diagonal.13[2], "Y" = diagonal.13[4])
+  )
+
+  angle.to.diagonal.2 <- angle.between.lines(
+    c("X" = long.axis[1], "Y" = long.axis[3]),
+    c("X" = long.axis[2], "Y" = long.axis[4]),
+    c("X" = diagonal.24[1], "Y" = diagonal.24[3]),
+    c("X" = diagonal.24[2], "Y" = diagonal.24[4])
+  )
+
+  # Select the diagonal axis closest to the long axis
+  if (abs(angle.to.diagonal.1) > abs(angle.to.diagonal.2)) {
+    pA <- p1
+    pB <- p3
+  } else {
+    pA <- p2
     pB <- p4
   }
-  long.axis <- ifelse(axis1 > axis2, axis1, axis2)
 
-  cat(pB, "\n")
+  # # Select the points lying on the longer axis
+  # pA <- p1
+  #
+  # if (axis.12.length > axis.14.length) {
+  #   pB <- p2
+  # } else {
+  #   pB <- p4
+  # }
+
 
   list(
-    max.feret = long.axis,
+    max.feret = sf::st_length(long.axis),
     p1 = list(X = pA["X"], "Y" = pA["Y"]),
     p2 = list(X = pB["X"], "Y" = pB["Y"]),
     dx = abs(pB["X"] - pA["X"]),
     dy = abs(pB["Y"] - pA["Y"]),
+    d.long = sf::st_length(long.axis),
+    d.short = sf::st_length(short.axis),
+    angle.to.diagonal.1 = angle.to.diagonal.1,
+    angle.to.diagonal.2 = angle.to.diagonal.2,
     x.com = x.com,
     y.com = y.com
   )
@@ -320,7 +438,7 @@ read.border.from.yolo <- function(file) {
         .groups = "drop"
       )
 
-    data$polygons <- lapply(data$expanded.bbox, function(x) sf::st_polygon(list(x)))
+    data$polygons <- lapply(data$poly.matrix, function(x) sf::st_polygon(list(x)))
 
     # We don't want the max Feret diameter from the expanded bboxes; the diagonal
     # is entirely different. Instead, we want the marker points to be placed along
