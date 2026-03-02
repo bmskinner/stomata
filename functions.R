@@ -25,8 +25,13 @@ save.ggplot <- function(plot, out.file, width = 170, height = 85) {
 
 # Save the given plot to the given path and return the plot
 # Size for powerpoint slide: width= 253.8, height = 190.05
+#
+# plot - the ggplot to save
+# image.file - the name of the image file to be saved
+# suffix - a file name suffix
+# width, height - dimensions in mm
 save.plot <- function(plot, image.file, suffix, width = 253.8, height = 190.05) { #
-  out.path <- str_replace(image.file, ".jpg", suffix)
+  out.path <- str_replace(basename(image.file), ".jpg", suffix)
   out.path <- str_replace(out.path, "/", "_")
   out.path <- paste0("figure/", out.path)
   save.ggplot(out.file = out.path, plot = plot, width = width, height = height)
@@ -110,17 +115,11 @@ rad2deg <- function(rad) (180 * rad) / pi
 #
 # Returns: the absolute angle between the lines in degrees
 angle.between.lines <- function(l1.p1, l1.p2, l2.p1, l2.p2) {
-  l1.pl <- left(l1.p1, l1.p2)
-  l1.pr <- right(l1.p1, l1.p2)
+  a <- l1.p2[["X"]] - l1.p1[["X"]] # l1 x diff
+  b <- l1.p2[["Y"]] - l1.p1[["Y"]] # l1 y diff
 
-  l2.pl <- left(l2.p1, l2.p2)
-  l2.pr <- right(l2.p1, l2.p2)
-
-  a <- l1.pr[["X"]] - l1.pl[["X"]] # l1 x diff
-  b <- l1.pr[["Y"]] - l1.pl[["Y"]] # l1 y diff
-
-  c <- l2.pr[["X"]] - l2.pl[["X"]] # l2 x difference
-  d <- l2.pr[["Y"]] - l2.pl[["Y"]] # l2 y difference
+  c <- l2.p2[["X"]] - l2.p1[["X"]] # l2 x difference
+  d <- l2.p2[["Y"]] - l2.p1[["Y"]] # l2 y difference
 
   atanA <- atan2(a, b)
   atanB <- atan2(c, d)
@@ -159,6 +158,25 @@ angle.to.horizontal <- function(x1, y1, x2, y2) {
   atanB <- atan2(c, d)
 
   rad2deg(atanA - atanB)
+}
+
+angle.is.within.range <- function(angle, reference.angle, max.angle.delta) {
+  min.angle <- (reference.angle - max.angle.delta) %% 180
+  max.angle <- (reference.angle + max.angle.delta) %% 180
+
+  # cat(
+  #   "Angle filter params:\nRef", reference.angle, "Max delta", max.angle.delta, "\n",
+  #   "Min:", min.angle, "Max:", max.angle, "\n",
+  #   "Input angles:", angle, "\n"
+  # )
+
+  # If we are close to 0 or 360, these will wrap; we must invert the range if so
+  if (min.angle > max.angle) {
+    # Handle wrapping of angles around 360
+    return(angle >= min.angle | angle <= max.angle)
+  }
+  # otherwise normal filter
+  return(angle >= min.angle & angle <= max.angle)
 }
 
 # Given a matrix containing X and Y columns constituting an bounding box border,
@@ -214,8 +232,6 @@ calculate.bounding.box.orientation.points <- function(points) {
     long.axis <- axis.14
     short.axis <- axis.12
   }
-  cat(long.axis, "\n")
-
 
   # Calculate the angle between the longest axis and the two possible
   # diagonals. We assume that one of the diagonals is the desired orientation.
@@ -310,8 +326,18 @@ calculate.stomata.orientation <- function(points) {
 
 # Find the maximum value in the density plot of the given vector
 find.mode <- function(x) {
-  d <- density(x)
-  d$x[which.max(d$y)]
+  # We are dealing with angles that may wrap around 180-0
+  # Duplicate the counts so we get a proper peak at 180
+  y <- c(x, x + 180)
+
+  # Get histogram, find peak with max
+  h <- hist(y, breaks = 72)
+  h$breaks[which.max(h$counts)] %% 180
+  #
+  # This approach will not work if there is a very sharp peak in the histogram
+  # beacuse a wide low peak may have overall higher density
+  #   d <- density(y)
+  #   d$x[which.max(d$y)] %% 180
 }
 
 # Calculate distance between two points
