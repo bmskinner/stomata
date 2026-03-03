@@ -452,23 +452,17 @@ read.border.from.yolo <- function(file) {
           ),
           ncol = 2, byrow = F
         )),
-        # Define a rectangle aligned to the vertical/horizontal axis of the image
-        # that contains the OBB
-        expanded.bbox = list(matrix(
-          c(
-            xmin, xmax, xmax, xmin, xmin,
-            ymin, ymin, ymax, ymax, ymin
-          ),
-          ncol = 2, byrow = F
-        )),
         .groups = "drop"
       )
 
-    data$polygons <- lapply(data$poly.matrix, function(x) sf::st_polygon(list(x)))
+    # Create a polygon object with the OBB
+    data$obbs <- lapply(data$poly.matrix, function(x) sf::st_polygon(list(x)))
 
-    # We don't want the max Feret diameter from the expanded bboxes; the diagonal
-    # is entirely different. Instead, we want the marker points to be placed along
-    # the longest axis of the expanded bbox.
+    # Calculate the largest circle fitting inside the bounding box
+    # This will help prevent spurious intersections between stomata being detected
+    data$polygons <- lapply(data$obbs, st_inscribed_circle, dTolerance = 0.0001)
+
+    # Calculate the Feret diameter of the polygons and other useful measures.
     data$feret <- lapply(data$polygons, \(x) calculate.bounding.box.orientation.points(sf::st_coordinates(x)))
     data <- data |>
       tidyr::unnest_wider(feret) |>
