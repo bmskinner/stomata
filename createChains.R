@@ -224,17 +224,19 @@ plot.contigs <- function(mer.data) {
 }
 
 plot.rotated.contigs <- function(mer.data) {
-  ggplot(mer.data$measured.contigs) +
+  ggplot(mer.data$oriented.contigs) +
+    geom_sf(data = mer.data$combined.chain.rectangles, fill = "pink", alpha = 0.6) +
+    geom_sf(data = st_polygon(mer.data$rotated.image.bounds), col = "black", fill = NA) +
+    geom_sf(data = st_multipolygon(mer.data$rotated.1mers$RotatedPolygon), fill = "darkgreen", alpha = 0.6) +
     geom_segment(
       aes(
-        x = Contig.start.x,
-        y = Contig.start.y,
+        x = RotatedContigStart[, 1],
+        y = RotatedContigStart[, 2],
         xend = RotatedContigEnd[, 1],
         yend = RotatedContigEnd[, 2]
       ),
       col = "grey20"
     ) +
-    # geom_segment(aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y), col = "grey")+
     geom_segment(aes(x = RotatedS1[, 1], y = RotatedS1[, 2], xend = RotatedS2[, 1], yend = RotatedS2[, 2]), col = "blue") +
     geom_point(aes(x = RotatedS1[, 1], y = RotatedS1[, 2]), col = "blue", size = 2) +
     geom_point(aes(x = RotatedS2[, 1], y = RotatedS2[, 2]), col = "blue", size = 2) +
@@ -446,7 +448,7 @@ create.2mers <- function(mer.data, min.distance, max.distance) {
       labs(title = sprintf("Modal angle %.2f°", mer.data$modal.2mer.angle)) +
       scale_x_continuous(breaks = seq(0, 360, 45)) +
       theme_bw()
-    save.plot(histo.plot, mer.data$image.file, ".mer2.histo.png")
+    save.plot(histo.plot, mer.data$image.file, ".diagnostic.mer2.histo.png")
   }
 
 
@@ -577,7 +579,7 @@ filter.3mers.by.straightness <- function(mer.data, max.angle.delta) {
       geom_density() +
       scale_x_continuous(breaks = seq(0, 360, 5)) +
       theme_bw()
-    save.plot(histo.plot, mer.data$image.file, ".mer3.angle.histo.png")
+    save.plot(histo.plot, mer.data$image.file, ".diagnostic.mer3.angle.histo.png")
   }
 
   filt <- mer.data$mer3 %>%
@@ -620,7 +622,7 @@ filter.3mers.by.orientation <- function(mer.data, max.angle.delta) {
       labs(title = sprintf("Modal angle %.2f°", mer.data$modal.mer3.angle)) +
       scale_x_continuous(breaks = seq(0, 360, 5)) +
       theme_bw()
-    save.plot(histo.plot, mer.data$image.file, ".mer3.angle.vertical.histo.png")
+    save.plot(histo.plot, mer.data$image.file, ".diagnostic.mer3.angle.vertical.histo.png")
   }
 
   filt <- mer.data$mer3 |>
@@ -843,59 +845,189 @@ create.contigs <- function(mer.data) {
   mer.data
 }
 
-# Calculate straightness, angles and lengths of contigs
+# Orient contigs consistently on the horizontal image axis. Calculates rotations
+# needed to visualise stomata with chains horizontal
 #
 # mer.data - the complete data
-measure.contigs <- function(mer.data) {
-  # Calculate average distances per contig
-  # and angle variation within the contig
-  dist.contigs <- mer.data$contigs %>%
-    dplyr::mutate(File = mer.data$image.file) %>%
-    dplyr::group_by(Contig) %>%
-    # Find the first and last stomata in the contig
+orient.contigs <- function(mer.data) {
+  # We need the image dimensions and centre as pivot point for rotation
+  image.width <- dim(mer.data$img)[2]
+  image.height <- dim(mer.data$img)[1]
+  image.xcom <- image.width / 2
+  image.ycom <- image.height / 2
+  image.centre <- c(image.xcom, image.ycom)
+
+  # Create a rectangle defining the image bounds. We will use this later to
+  # limit measurement of rotated objects to regions within the original image.
+  mer.data$image.bounds <- sf::st_polygon(list(
+    matrix(
+      c(
+        image.width, 0,
+        image.width, image.height,
+        0, image.height,
+        0, 0,
+        image.width, 0
+      ),
+      ncol = 2, byrow = TRUE
+    )
+  ))
+
+  # Rotate the given xy coordinate about the centre of mass of the current image
+  rotate.about.image.com <- function(x, y = NULL, degrees) {
+    # if we have an st_polygon, we only need the first two columns
+    if (any(class(x) == "POLYGON")) {
+      return(list(autoimage::rotate(x[[1]][, 1:2],
+        -deg2rad(degrees),
+        pivot = c(image.xcom, image.ycom)
+      )))
+    }
+
+    # if we have a point already as a matrix of x and y elements
+    if (is.matrix(x)) {
+      return(autoimage::rotate(x,
+        -deg2rad(degrees),
+        pivot = c(image.xcom, image.ycom)
+      ))
+    }
+
+    autoimage::rotate(matrix(c(x, y), nrow = 1),
+      -deg2rad(degrees),
+      pivot = c(image.xcom, image.ycom)
+    )
+  }
+
+  # Calculate the orientation of the contigs. This proceeds in two steps; first,
+  # apply the modal 3mer angle rotation. This makes most of the contigs mostly
+  # horizontal. We can then decide which stomata is at the start and end of each
+  # contig. The overall contig orientation is the straight line from start-end.
+  # This probably does not match the overall 3mer orientation perfectly, because
+  # the 3mers wibble around within the contigs. We can calculate the median
+  # overall angle of the contigs, and apply this second angle correction. The
+  # contigs are now as horizontal as we can make them.
+  mer.data$oriented.contigs <- mer.data$contigs |>
+    dplyr::rowwise() |>
     dplyr::mutate(
-      Contig.start.index = which.min(S1.x),
-      Contig.start.x = S1.x[Contig.start.index],
-      Contig.start.y = S1.y[Contig.start.index],
-      Contig.end.index = which.max(S2.x),
-      Contig.end.x = S2.x[Contig.end.index],
-      Contig.end.y = S2.y[Contig.end.index],
-      n.stomata.in.contig = n()
-    ) %>%
-    # Calculate the absolute angle of the contig in the image against the vertical
-    # Use this to calculate the angle against the horizontal
-    dplyr::rowwise() %>%
+      # Rotate each 2mer coordinate about the contig start point
+      RotatedS1 = rotate.about.image.com(
+        S1.x, S1.y,
+        mer.data$modal.mer3.angle - 90
+      ),
+      RotatedS2 = rotate.about.image.com(
+        S2.x, S2.y,
+        mer.data$modal.mer3.angle - 90
+      )
+    ) |>
+    # The contigs are now roughly horizontal.
+    # Identify the endpoints of the contig
+    dplyr::group_by(Contig) |>
+    dplyr::mutate(
+      Contig.start.index = which.min(RotatedS1[, 1]),
+      Contig.start.x = RotatedS1[Contig.start.index, 1],
+      Contig.start.y = RotatedS1[Contig.start.index, 2],
+      Contig.end.index = which.max(RotatedS2[, 1]),
+      Contig.end.x = RotatedS2[Contig.end.index, 1],
+      Contig.end.y = RotatedS2[Contig.end.index, 2],
+    ) |>
+    # Now find the remaining offset angle for the contigs. Calculate the median
+    # across all contigs.
+    dplyr::rowwise() |>
     dplyr::mutate(
       Contig.abs.angle = angle.to.horizontal(
         Contig.start.x, Contig.start.y,
         Contig.end.x, Contig.end.y
-      ),
-      Contig.abs.length = euclidean(Contig.start.x, Contig.start.y, Contig.end.x, Contig.end.y),
-      Contig.abs.angle.radians = -deg2rad(Contig.abs.angle),
-
-      # Rotate the end of the contig about the contig start point
-      RotatedContigEnd = autoimage::rotate(matrix(c(Contig.end.x, Contig.end.y), nrow = 1),
-        Contig.abs.angle.radians,
-        pivot = c(Contig.start.x, Contig.start.y)
-      ),
-
-      # Rotate the kmer coordinates about the contig start point
-      RotatedS1 = autoimage::rotate(matrix(c(S1.x, S1.y), nrow = 1),
-        Contig.abs.angle.radians,
-        pivot = c(Contig.start.x, Contig.start.y)
-      ),
-      RotatedS2 = autoimage::rotate(matrix(c(S2.x, S2.y), nrow = 1),
-        Contig.abs.angle.radians,
-        pivot = c(Contig.start.x, Contig.start.y)
       )
-    ) %>%
+    ) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(contig.median.angle = median(Contig.abs.angle)) |>
+    # Adjust the rotation of 2mers again to make the contigs as close to
+    # horizontal as possible.
+
+    dplyr::rowwise() |>
+    dplyr::mutate(
+      # Rotate each 2mer coordinate
+      RotatedS1 = rotate.about.image.com(x = RotatedS1, degrees = contig.median.angle),
+      RotatedS2 = rotate.about.image.com(x = RotatedS2, degrees = contig.median.angle),
+
+      # Rotate the contig about the image centre
+      RotatedContigStart = rotate.about.image.com(Contig.start.x, Contig.start.y, contig.median.angle),
+      RotatedContigEnd = rotate.about.image.com(Contig.end.x, Contig.end.y, contig.median.angle)
+    )
+
+  # We now know the total rotation needing to be applied to the image
+  total.rotation <- mer.data$modal.mer3.angle - 90 + unique(mer.data$oriented.contigs$contig.median.angle)
+
+  # Create the rotated image bounding box
+  mer.data$rotated.image.bounds <- rotate.about.image.com(
+    x = mer.data$image.bounds,
+    degrees = total.rotation
+  )
+
+  # Rotate the individual stomata polygons
+  # Make a rotated copy of the polygons for display
+  mer.data$rotated.1mers <- mer.data$mer1 |>
+    dplyr::rowwise() |>
+    dplyr::mutate(
+      coordinates = list(matrix(sf::st_coordinates(polygons)[, 1:2], ncol = 2)),
+      RotatedCoordinates = rotate.about.image.com(
+        x = polygons,
+        degrees = total.rotation
+      ),
+
+      # Also note the min and max y position of each rotated polygon. We will use
+      # this to establish the shared rectangles covering each chain
+      polygon.min.y = min(RotatedCoordinates[, 2]),
+      polygon.max.y = max(RotatedCoordinates[, 2])
+    )
+
+  mer.data$rotated.1mers$RotatedPolygon <- lapply(
+    mer.data$rotated.1mers$RotatedCoordinates,
+    function(x) sf::st_polygon(list(x))
+  )
+
+
+  # Now create the unioned rectangles along each chain
+  mer.data$rotated.chain.rectangles <- mapply(
+    function(y.min, y.max) {
+      sf::st_polygon(list(
+        matrix(
+          c(
+            min(mer.data$rotated.image.bounds[[1]][, 1]), y.min,
+            max(mer.data$rotated.image.bounds[[1]][, 1]), y.min,
+            max(mer.data$rotated.image.bounds[[1]][, 1]), y.max,
+            min(mer.data$rotated.image.bounds[[1]][, 1]), y.max,
+            min(mer.data$rotated.image.bounds[[1]][, 1]), y.min
+          ),
+          ncol = 2, byrow = TRUE
+        )
+      ))
+    },
+    y.min = mer.data$rotated.1mers$polygon.min.y,
+    y.max = mer.data$rotated.1mers$polygon.max.y,
+    SIMPLIFY = FALSE
+  )
+
+  # Combine all overlapping chain rectangles
+  mer.data$combined.chain.rectangles <- sf::st_simplify(sf::st_combine(do.call("c", mer.data$rotated.chain.rectangles)))
+
+  # Intersect chain rectangles with the image bounds
+  mer.data$combined.chain.rectangles <- sf::st_intersection(mer.data$combined.chain.rectangles, sf::st_polygon(mer.data$rotated.image.bounds))
+
+  mer.data
+}
+
+
+# Calculate straightness, angles and lengths of contigs
+#
+# mer.data - the complete data
+measure.contigs <- function(mer.data) {
+  mer.data$measured.contigs <- mer.data$oriented.contigs |>
     # Calculate the deviation between the contig line and the individual points
     dplyr::mutate(
       S1.deviance = RotatedS1[, 2] - Contig.start.y,
       S2.deviance = RotatedS2[, 2] - Contig.start.y
-    ) %>%
+    ) |>
     # Ensure no duplicate kmers
-    dplyr::select(-mer2id) %>%
+    dplyr::select(-mer2id) |>
     dplyr::distinct()
 
   # How many stomata are not in a chain?
@@ -905,8 +1037,7 @@ measure.contigs <- function(mer.data) {
   mer.data$nStomata <- length(unique(mer.data$mer1$stomata))
   mer.data$nUnassignedStomata <- length(unique(mer.data$stomata.unassigned))
   mer.data$fUnassignedStomata <- length(unique(mer.data$stomata.unassigned)) / mer.data$nStomata
-
-  mer.data$measured.contigs <- dist.contigs
+  mer.data$fAreaOfChainBounds <- sf::st_area(mer.data$combined.chain.rectangles) / sf::st_area(mer.data$image.bounds)
 
 
   if (mer.data$write.debug.images) save.plot(plot.rotated.contigs(mer.data), mer.data$image.file, ".result.rotated.png")
@@ -972,6 +1103,7 @@ process.yolo.predictions <- function(yolo.output.file, write.chain.image = FALSE
 
   # Create contigs from the 3mers based on overlapping 2mers
   data <- create.contigs(data)
+  data <- orient.contigs(data)
 
   # Calculate summary values of contigs
   data <- measure.contigs(data)
