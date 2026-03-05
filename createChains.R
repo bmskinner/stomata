@@ -363,21 +363,20 @@ filter.1mers.for.overlaps <- function(mer.data, min.distance) {
 create.2mers <- function(mer.data, min.distance, max.distance) {
   # Create all pairwise combinations of 1mers
   result <- expand.grid(mer.data$mer1$stomata, mer.data$mer1$stomata, stringsAsFactors = F) |>
-    dplyr::distinct() |> # remove duplicates
     dplyr::filter(Var1 != Var2) |>
+    dplyr::distinct() |>
     merge(mer.data$mer1[, c("stomata", "x.com", "y.com")], by.x = "Var1", by.y = "stomata", all.y = F) |> # add coordinates for S1
     dplyr::select(S1 = Var1, S1.x = x.com, S1.y = y.com, S2 = Var2) %>% # rename for clarity
     merge(mer.data$mer1[, c("stomata", "x.com", "y.com")], by.x = "S2", by.y = "stomata", all.y = F) |> # add coordinates for S2
     dplyr::select(S1, S1.x, S1.y, S2, S2.x = x.com, S2.y = y.com) |> # rename for clarity
-
     # Apply a length filter to exclude 2mers that are too distant
     # The plurality of the remaining edges will be orientated along the chains
     dplyr::mutate(length = euclidean(S1.x, S1.y, S2.x, S2.y)) |>
-    dplyr::filter(between(length, min.distance, max.distance)) |>
     # Calculate the angle of a 2mer based on the locations of the points at either end
     # Wrap at 180 degrees
-    dplyr::mutate(angle.of.2mer = angle.to.vertical(S1.x, S1.y, S2.x, S2.y) %% 180)
-
+    dplyr::mutate(angle.of.2mer = angle.to.vertical(S1.x, S1.y, S2.x, S2.y) %% 180) |>
+    dplyr::filter(between(length, min.distance, max.distance)) |>
+    dplyr::distinct()
 
   # What is the distribution of 2mer angles in the data?
   mer.data$modal.2mer.angle <- find.mode(result$angle.of.2mer)
@@ -427,15 +426,10 @@ create.2mers <- function(mer.data, min.distance, max.distance) {
 
   result <- result |>
     dplyr::select(S1, S1.x, S1.y, S2, S2.x, S2.y, length, angle.of.2mer) |>
-    dplyr::mutate(kmer = paste0(S1, S2))
-
-
-  # Convert stomata CoMs to list of coordinates
-  # result$S1.point <- mapply(\(x, y, n) list(X = x, Y = y, name = n), result$S1.x, result$S1.y, result$S1, SIMPLIFY = FALSE)
-  # result$S2.point <- mapply(\(x, y, n) list(X = x, Y = y, name = n), result$S2.x, result$S2.y, result$S2, SIMPLIFY = FALSE)
-
-  # Make a name for the 2mer that can be used as an ID
-  # result$kmer <- mapply(\(p1, p2) paste0(p1$name, p2$name), result$S1.point, result$S2.point)
+    dplyr::mutate(kmer = paste0(S1, S2)) |>
+    dplyr::group_by(kmer) |>
+    dplyr::slice_head(n = 1) |>
+    dplyr::mutate(mer2id = row_number())
 
   if (mer.data$write.debug.images) {
     dup.data <- data.frame("angle.of.2mer" = c(result$angle.of.2mer, result$angle.of.2mer + 180))
@@ -451,16 +445,11 @@ create.2mers <- function(mer.data, min.distance, max.distance) {
     save.plot(histo.plot, mer.data$image.file, ".diagnostic.mer2.histo.png")
   }
 
-
-  if (nrow(result) > 0) {
-    result$mer2id <- 1:nrow(result)
-  }
   cat(
     "Created", nrow(result), "2mers from", nrow(mer.data$mer1), "1mers within length bounds",
     min.distance, "-", max.distance, "pixels\n"
   )
 
-  # cat("Created", nrow(result), "2mers from", nrow(mer.data$mer1), "1mers\n")
   mer.data$mer2 <- result
 
   if (mer.data$write.debug.images) save.plot(plot.2mers(mer.data), mer.data$image.file, ".mer2.1.raw.png")
@@ -748,32 +737,171 @@ filter.3mers.by.terminal <- function(mer.data) {
 }
 
 
-# create a deBruijn graph from kmers
+# Join 2mers into a graph based on shared 3mers.
 #
 # mer.data - the complete data
-create.debruijn.graph <- function(mer.data) {
-  # Find the unique 2mers. This assumes the 2mers are consistently ordered (i.e.
-  # we cannot find both s1-s2 and s2-s1 in the data)
-  uks <- unique(c(mer.data$merFirst, mer.data$merLast)) # unique 2mers
-  if (length(uks) == 0) {
+create.2mer.graph <- function(mer.data) {
+  # Find the unique 2mers that are present in 3mers. This assumes the 2mers are
+  # consistently ordered (i.e. we cannot find both s1-s2 and s2-s1 in the data).
+  unique.2mers <- unique(c(mer.data$mer3$merFirst, mer.data$mer3$merLast))
+  if (length(unique.2mers) == 0) {
     return(make_empty_graph())
   }
-  #
-  # # Assign an id to each kmer
-  k.index <- function(kmer) which(uks == kmer)
-  mer.data$merLid <- sapply(mer.data$merFirst, k.index)
-  mer.data$merRid <- sapply(mer.data$merLast, k.index)
 
-  # Make a deBruijn graph from kmers
-  g <- make_empty_graph()
-  g <- add_vertices(g, length(uks))
-  V(g)$kmer <- uks
+  cat(sprintf(
+    "Found %i unique 2mers within the remaining %i 3mers\n",
+    length(unique.2mers), nrow(mer.data$mer3)
+  ))
 
-  # Link kmers by edges
-  for (i in 1:nrow(mer.data)) {
-    g <- g + edges(c(mer.data$merLid[i], mer.data$merRid[i]))
+  # Find standalone 2mers that are not part of a 3mer but may still be
+  # part of a chain (either a chain of 2 stomata, or 2mers connecting other
+  # chains)
+  standalone.2mers <- mer.data$mer2 |>
+    dplyr::filter(
+      !(kmer %in% unique.2mers),
+      intersects <= 2
+    ) |>
+    dplyr::filter(angle.is.within.range(
+      angle.of.2mer,
+      mer.data$modal.mer3.angle,
+      ANGLE.DELTA.2MER.STRINGENT
+    )) |>
+    dplyr::distinct()
+
+  valid.2mers <- c(unique.2mers, standalone.2mers$kmer)
+
+  # cat(sprintf(
+  #   "Added %i remaining 2mers within %.2f° of the modal 3mer angle (%.2f°)\n",
+  #   nrow(standalone.2mers), ANGLE.DELTA.2MER.STRINGENT, mer.data$modal.mer3.angle
+  # ))
+
+
+  # There may still be some fully standalone 2mer chains that were excluded by
+  # the stringent angle threshold. We can find these by identifying 2mers at the
+  # valid angle that do not share a stomata with any other chains.
+  chain.2mers <- mer.data$mer2 |>
+    dplyr::filter(
+      # !(kmer %in% valid.2mers),
+      intersects <= 2,
+      angle.is.within.range(
+        angle.of.2mer,
+        mer.data$modal.mer3.angle,
+        ANGLE.DELTA.2MER
+      )
+    ) |>
+    dplyr::group_by(S1) |>
+    dplyr::filter(n() == 1) |>
+    dplyr::group_by(S2) |>
+    dplyr::filter(n() == 1)
+  # !(S1 %in% mer.data$mer2$S2),
+  # !(S2 %in% mer.data$mer2$S1)
+  # )
+
+  valid.2mers <- c(valid.2mers, chain.2mers$kmer)
+
+  cat(sprintf(
+    "Selected %i 2mers: %i 2mers within valid 3mers, %i 2mers within %.2f° of the modal 3mer angle (%.2f°) and %i standalone 2mers within %.2f° of the modal 3mer angle\n",
+    length(valid.2mers), length(unique.2mers),
+    nrow(standalone.2mers), ANGLE.DELTA.2MER.STRINGENT,
+    mer.data$modal.mer3.angle, nrow(chain.2mers), ANGLE.DELTA.2MER
+  ))
+
+
+  # We can at this point use the 2mers for graph construction
+  valid.2mers <- c(valid.2mers, chain.2mers$kmer)
+  all.1mers <- unique(c(mer.data$mer2$S1, mer.data$mer2$S2))
+
+  cat(sprintf(
+    "Creating graph from %i stomata connected by %i 2mers\n",
+    length(all.1mers), length(valid.2mers)
+  ))
+
+  # Find the vertex id of each 1mer in the graph
+  stomata.index <- function(somtata.id) which(all.1mers == somtata.id)
+  mer.data$mer2$S1.id <- sapply(mer.data$mer2$S1, stomata.index)
+  mer.data$mer2$S2.id <- sapply(mer.data$mer2$S2, stomata.index)
+
+  # Set stomata as vertices in the network
+  mer2.graph <- igraph::make_empty_graph()
+  mer2.graph <- igraph::add_vertices(mer2.graph, length(all.1mers))
+  igraph::V(mer2.graph)$mer1 <- all.1mers
+
+  mer2.filtered <- mer.data$mer2 |>
+    dplyr::filter(kmer %in% valid.2mers)
+
+  cat(sprintf(
+    "Building edges from %i valid 2mers out of %i total 2mers\n",
+    nrow(mer2.filtered), nrow(mer.data$mer2)
+  ))
+
+  # Connect by 2mer edges if the 2mer is in the desired subset
+  for (i in 1:nrow(mer2.filtered)) {
+    if (mer2.filtered$kmer[i] %in% valid.2mers) {
+      mer2.graph <- igraph::add_edges(mer2.graph,
+        c(mer2.filtered$S1.id[i], mer2.filtered$S2.id[i]),
+        mer2 = mer2.filtered$kmer[i]
+      )
+    }
   }
-  g
+  mer2.graph
+
+  ### Original 3mer graph approach below
+
+  # # Assign an id to each kmer
+  # k.index <- function(kmer) which(unique.2mers == kmer)
+  # mer.data$merLid <- sapply(mer.data$mer3$merFirst, k.index)
+  # mer.data$merRid <- sapply(mer.data$mer3$merLast, k.index)
+  #
+  # # Make a graph from shared 2mers. The vertices of the graph are the 2mers, and
+  # # the edges are the 3mers they are part of
+  # mer3.graph <- igraph::make_empty_graph()
+  # mer3.graph <- igraph::add_vertices(mer3.graph, length(unique.2mers))
+  # igraph::V(mer3.graph)$kmer <- unique.2mers
+  #
+  # # Link 3mers by 2mer edges
+  # for (i in 1:nrow(mer.data$mer3)) {
+  #   mer3.graph <- mer3.graph + igraph::edges(c(mer.data$mer3$merLid[i], mer.data$mer3$merRid[i]))
+  # }
+  # mer3.graph
+}
+
+
+create.2mer.contigs <- function(mer.data) {
+  if (nrow(mer.data$mer2) == 0) {
+    return(mer.data$mer2 %>% dplyr::mutate(Contig = list()))
+  }
+
+  complete.graph <- create.2mer.graph(mer.data)
+
+  # Decompose unlinked contigs
+  contig.subgraphs <- igraph::decompose(complete.graph)
+
+  # Create unique identifier for each contig
+  # Get the number of the contig each stomata belongs to
+  assign.contig.number <- function(i) {
+    subgraph <- contig.subgraphs[[i]]
+    stomata.id <- vertex_attr(subgraph, "mer1")
+    mer2.id <- edge_attr(subgraph, "mer2")
+    data.frame(mer2.id = mer2.id, Contig = rep(i, length(mer2.id)))
+  }
+
+  # Assign each stomata a contig number
+  contig.numbers <- do.call(rbind, lapply(1:length(contig.subgraphs), assign.contig.number))
+
+  mer.data$contigs <- merge(contig.numbers, mer.data$mer2,
+    all.x = TRUE, by.x = "mer2.id", by.y = "kmer"
+  ) %>%
+    dplyr::mutate(
+      Image = mer.data$image.file,
+      Folder = basename(dirname(Image)),
+      File = basename(Image)
+    )
+
+  cat("Created", length(unique(mer.data$contigs$Contig)), "contigs from 2mers\n")
+
+  if (mer.data$write.chain.image) save.plot(plot.contigs(mer.data), mer.data$image.file, ".result.chains.png")
+
+  mer.data
 }
 
 # Create contigs from kmers. Each unlinked group of 3mers is separated to a
@@ -781,69 +909,72 @@ create.debruijn.graph <- function(mer.data) {
 # 2mers are combined into a contig where possible
 #
 # mer.data - the complete data
-create.contigs <- function(mer.data) {
-  if (nrow(mer.data$mer3) == 0) {
-    return(mer.data$mer3 %>% dplyr::mutate(Contig = list()))
-  }
-
-  g <- create.debruijn.graph(mer.data$mer3)
-
-  # Decompose unlinked contigs
-  gphs <- decompose.graph(g)
-
-  # Get the number of the contig each 2mer belongs to
-  get.contig.number <- function(i) {
-    gph <- gphs[[i]]
-    contig <- vertex_attr(gph, "kmer")
-    contig.num <- rep(i, length(contig))
-    names(contig.num) <- contig
-    contig.num
-  }
-
-  # Assign each contig a number
-  contig.numbers <- do.call(c, lapply(1:length(gphs), get.contig.number))
-  result <- mer.data$mer3 %>%
-    dplyr::mutate(Contig = map_int(merFirst, function(x) contig.numbers[names(contig.numbers) == x]))
-
-  # Keep only the list of 2mers belonging to each contig
-  result <- result %>%
-    dplyr::select(Contig, merFirst, merLast, Contig) %>%
-    tidyr::pivot_longer(c(merFirst, merLast), names_to = "kmer_type", values_to = "kmer") %>%
-    dplyr::select(Contig, kmer)
-
-  # What about leftover 2mers that should be in chains? Even more stringent
-  # angle filter to get only those that are on the correct orientation
-  remaining.2mers <- mer.data$mer2 %>%
-    dplyr::filter(!(kmer %in% result$kmer))
-
-  # If there are any valid 2mers left, try to bind them in
-  if (nrow(remaining.2mers) > 0) {
-    remaining.2mers <- remaining.2mers %>%
-      dplyr::filter(angle.is.within.range(
-        angle.of.2mer,
-        mer.data$modal.2mer.angle,
-        ANGLE.DELTA.2MER.STRINGENT
-      )) %>%
-      dplyr::mutate(Contig = max(result$Contig) + row_number()) %>%
-      dplyr::select(Contig, kmer)
-
-    result <- rbind(result, remaining.2mers)
-  }
-
-  mer.data$contigs <- merge(result, mer.data$mer2, all.y = FALSE, by = "kmer") %>%
-    dplyr::mutate(
-      Image = mer.data$image.file,
-      Folder = basename(dirname(Image)),
-      File = basename(Image)
-    )
-
-
-  cat("Created", length(unique(mer.data$contigs$Contig)), "contigs from 3mers\n")
-
-  if (mer.data$write.chain.image) save.plot(plot.contigs(mer.data), mer.data$image.file, ".result.chains.png")
-
-  mer.data
-}
+# create.contigs <- function(mer.data) {
+#   if (nrow(mer.data$mer3) == 0) {
+#     return(mer.data$mer3 %>% dplyr::mutate(Contig = list()))
+#   }
+#
+#   complete.graph <- create.2mer.graph(mer.data)
+#
+#   # Decompose unlinked contigs
+#   contig.subgraphs <- igraph::decompose(complete.graph)
+#
+#
+#   # Get the number of the contig each 2mer belongs to
+#   get.contig.number <- function(i) {
+#     gph <- contig.subgraphs[[i]]
+#     contig <- vertex_attr(gph, "kmer")
+#     contig.num <- rep(i, length(contig))
+#     names(contig.num) <- contig
+#     contig.num
+#   }
+#
+#   # Assign each contig a number
+#   contig.numbers <- do.call(c, lapply(1:length(contig.subgraphs), get.contig.number))
+#   result <- mer.data$mer3 %>%
+#     dplyr::mutate(Contig = map_int(merFirst, function(x) contig.numbers[names(contig.numbers) == x]))
+#
+#   # Keep only the list of 2mers belonging to each contig
+#   result <- result %>%
+#     dplyr::select(Contig, merFirst, merLast, Contig) %>%
+#     tidyr::pivot_longer(c(merFirst, merLast), names_to = "kmer_type", values_to = "kmer") %>%
+#     dplyr::select(Contig, kmer)
+#
+#   # What about leftover 2mers that should be in chains? Even more stringent
+#   # angle filter to get only those that are on the correct orientation
+#   remaining.2mers <- mer.data$mer2 %>%
+#     dplyr::filter(!(kmer %in% result$kmer))
+#
+#   # If there are any valid 2mers left, try to bind them in
+#   if (nrow(remaining.2mers) > 0) {
+#     remaining.2mers <- remaining.2mers |>
+#       dplyr::filter(angle.is.within.range(
+#         angle.of.2mer,
+#         mer.data$modal.2mer.angle,
+#         ANGLE.DELTA.2MER.STRINGENT
+#       ))
+#
+#     remaining.2mers <- remaining.2mers |>
+#       dplyr::mutate(Contig = max(result$Contig) + row_number()) %>%
+#       dplyr::select(Contig, kmer)
+#
+#     result <- rbind(result, remaining.2mers)
+#   }
+#
+#   mer.data$contigs <- merge(result, mer.data$mer2, all.y = FALSE, by = "kmer") %>%
+#     dplyr::mutate(
+#       Image = mer.data$image.file,
+#       Folder = basename(dirname(Image)),
+#       File = basename(Image)
+#     )
+#
+#
+#   cat("Created", length(unique(mer.data$contigs$Contig)), "contigs from 3mers\n")
+#
+#   if (mer.data$write.chain.image) save.plot(plot.contigs(mer.data), mer.data$image.file, ".result.chains.png")
+#
+#   mer.data
+# }
 
 # Orient contigs consistently on the horizontal image axis. Calculates rotations
 # needed to visualise stomata with chains horizontal
@@ -872,7 +1003,12 @@ orient.contigs <- function(mer.data) {
     )
   ))
 
-  # Rotate the given xy coordinate about the centre of mass of the current image
+  # Rotate the given xy coordinates around the centre of the current image
+  #
+  # x - an sf object, a matrix of XY coordinates, or an x coordinate
+  # y - a y coordinate. If missing, x is assumed to be an sf or matrix
+  # degrees - the angle for rotation
+  # Returns: matrix of rotated coordinates
   rotate.about.image.com <- function(x, y = NULL, degrees) {
     # if we have an st_polygon, we only need the first two columns
     if (any(class(x) == "POLYGON")) {
@@ -1042,6 +1178,12 @@ measure.contigs <- function(mer.data) {
 
   if (mer.data$write.debug.images) save.plot(plot.rotated.contigs(mer.data), mer.data$image.file, ".result.rotated.png")
 
+
+  # TODO - measure brokenness of chains. Project the chain start-end line to the
+  # image boundary. Measure the fractional length occupied by the chain. This
+  # accounts for how much of the chain we could image depending on the
+  # orientation of the leaf.
+
   mer.data
 }
 
@@ -1102,9 +1244,14 @@ process.yolo.predictions <- function(yolo.output.file, write.chain.image = FALSE
 
 
   # Create contigs from the 3mers based on overlapping 2mers
-  data <- create.contigs(data)
-  data <- orient.contigs(data)
+  # data <- create.contigs(data)
 
+  data <- create.2mer.contigs(data)
+
+
+
+  data <- orient.contigs(data)
+  #
   # Calculate summary values of contigs
   data <- measure.contigs(data)
 
@@ -1127,7 +1274,7 @@ process.yolo.predictions <- function(yolo.output.file, write.chain.image = FALSE
     "metadata" = data$metadata
   )
 
-  saveRDS(output.data, rds.output)
+  # saveRDS(output.data, rds.output)
 
   data
 }
@@ -1163,7 +1310,7 @@ input.yolo.files <- list.files(path = "analysis", pattern = "*.tsv", include.dir
 
 
 # Test on just the one
-data <- process.yolo.predictions(input.yolo.files[1], write.chain.image = TRUE, write.debug.images = TRUE)
+data <- process.yolo.predictions(input.yolo.files[3], write.chain.image = TRUE, write.debug.images = TRUE)
 
 #### Run parallel ####
 

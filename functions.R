@@ -161,6 +161,7 @@ angle.to.horizontal <- function(x1, y1, x2, y2) {
 }
 
 angle.is.within.range <- function(angle, reference.angle, max.angle.delta) {
+  if (is.null(reference.angle)) stop("Reference angle is missing")
   min.angle <- (reference.angle - max.angle.delta) %% 180
   max.angle <- (reference.angle + max.angle.delta) %% 180
 
@@ -331,7 +332,7 @@ find.mode <- function(x) {
   y <- c(x, x + 180)
 
   # Get histogram, find peak with max
-  h <- hist(y, breaks = 72)
+  h <- hist(y, breaks = 72, plot = FALSE)
   h$breaks[which.max(h$counts)] %% 180
   #
   # This approach will not work if there is a very sharp peak in the histogram
