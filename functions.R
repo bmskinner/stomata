@@ -171,9 +171,9 @@ angle.is.within.range <- function(angle, reference.angle, max.angle.delta) {
   #   "Input angles:", angle, "\n"
   # )
 
-  # If we are close to 0 or 360, these will wrap; we must invert the range if so
+  # If we are close to 0 or 180, these will wrap; we must invert the range if so
   if (min.angle > max.angle) {
-    # Handle wrapping of angles around 360
+    # Handle wrapping of angles around 180
     return(angle >= min.angle | angle <= max.angle)
   }
   # otherwise normal filter

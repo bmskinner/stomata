@@ -9,7 +9,7 @@ MIN.DISTANCE <- 50
 MAX.DISTANCE <- 500
 
 # 2mer angle variation from the modal value in degrees
-ANGLE.DELTA.2MER <- 15
+ANGLE.DELTA.2MER <- 20
 
 # How far can a 3mer deviate from a 180 line in degrees?
 ANGLE.DELTA.INTERNAL.3MER <- 10
@@ -18,11 +18,13 @@ ANGLE.DELTA.MODAL.3MER <- 10
 
 # If we have remaining 2mers that might be part of a contig, how stringent an angle
 # must they have to the modal 2mer angle in degrees?
-ANGLE.DELTA.2MER.STRINGENT <- 5
+ANGLE.DELTA.2MER.STRINGENT <- 8
 
 #### Plotting Functions #####
 
-plot.1mers <- function(mer.data, include.stomata = TRUE) {
+# Create a ggplot with the image drawn as a background layer
+create.background.image.plot <- function(mer.data) {
+  # Create image raster
   img.grob <- rasterGrob(mer.data$img, interpolate = TRUE)
 
   # Don't show message about new coord system by creating it, then setting it as
@@ -30,6 +32,17 @@ plot.1mers <- function(mer.data, include.stomata = TRUE) {
   cf <- coord_fixed(xlim = c(0, dim(mer.data$img)[2]), ylim = c(0, dim(mer.data$img)[1]))
   cf$default <- TRUE
 
+  ggplot() +
+    # Draw the input image as a background
+    annotation_custom(img.grob,
+      xmin = 0, xmax = dim(mer.data$img)[2],
+      ymin = 0, ymax = dim(mer.data$img)[1]
+    ) +
+    cf
+}
+
+plot.1mers <- function(mer.data, include.stomata = TRUE) {
+  p <- create.background.image.plot(mer.data)
 
   stomata <- data.frame(
     "x1" = sapply(mer.data$mer1$p1, \(p) p$X),
@@ -38,28 +51,13 @@ plot.1mers <- function(mer.data, include.stomata = TRUE) {
     "y2" = sapply(mer.data$mer1$p2, \(p) p$Y)
   )
 
-
-  p <- ggplot() +
-    # Draw the input image as a background
-    annotation_custom(img.grob,
-      xmin = 0, xmax = dim(mer.data$img)[2],
-      ymin = 0, ymax = dim(mer.data$img)[1]
-    ) +
-    cf +
+  p <- p +
 
     # Draw the border polygons
     geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6) +
 
-    # Write the angles of the 1mer
-    # geom_text(
-    #   data = mer.data$mer1, aes(x = x.com, y = y.com + 20, label = sprintf("%.0f", abs.angle)),
-    #   col = "red", size = 1.5
-    # ) +
-    # geom_text(data = mer.data$mer1, aes(x = x.com, y = y.com-20, label = sprintf("%.0f", horzAngle)),
-    #           col = "red", size = 1.5)+
-
     # Draw the name of each stomata
-    geom_text(data = mer.data$mer1, aes(x = x.com, y = y.com - 10, label = stomata), col = "pink1", size = 2) +
+    geom_text(data = mer.data$mer1, aes(x = x.com, y = y.com - 15, label = stomata), col = "pink1", size = 2) +
     theme_bw() +
     theme(
       axis.title = element_blank(),
@@ -81,21 +79,7 @@ plot.1mers <- function(mer.data, include.stomata = TRUE) {
 
 
 plot.2mers <- function(mer.data) {
-  # Create image raster
-  img.grob <- rasterGrob(mer.data$img, interpolate = TRUE)
-
-  # Don't show message about new coord system by creating it, then setting it as
-  # default before use
-  cf <- coord_fixed(xlim = c(0, dim(mer.data$img)[2]), ylim = c(0, dim(mer.data$img)[1]))
-  cf$default <- TRUE
-
-  ggplot() +
-    # Draw the input image as a background
-    annotation_custom(img.grob,
-      xmin = 0, xmax = dim(mer.data$img)[2],
-      ymin = 0, ymax = dim(mer.data$img)[1]
-    ) +
-    cf +
+  create.background.image.plot(mer.data) +
 
     # Draw the border polygons
     geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6) +
@@ -103,7 +87,7 @@ plot.2mers <- function(mer.data) {
     # Draw the 2mer
     geom_segment(
       data = mer.data$mer2, aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y),
-      col = "blue", linewidth = 0.5
+      col = "blue", linewidth = 0.5, arrow = arrow(type = "closed", angle = 20, length = unit(3, "mm"))
     ) +
 
     # Write the angle of the 2mer
@@ -120,8 +104,8 @@ plot.2mers <- function(mer.data) {
     geom_point(data = mer.data$mer2, aes(x = S2.x, y = S2.y), col = "orange", size = 1) +
 
     # Draw the name of each stomata in the 2mer
-    geom_text(data = mer.data$mer2, aes(x = S1.x, y = S1.y - 10, label = S1), col = "pink1", size = 2) +
-    geom_text(data = mer.data$mer2, aes(x = S2.x, y = S2.y - 10, label = S2), col = "pink1", size = 2) +
+    geom_text(data = mer.data$mer2, aes(x = S1.x, y = S1.y - 15, label = S1), col = "pink1", size = 2) +
+    geom_text(data = mer.data$mer2, aes(x = S2.x, y = S2.y - 15, label = S2), col = "pink1", size = 2) +
     theme_bw() +
     theme(
       axis.title = element_blank(),
@@ -135,19 +119,7 @@ plot.2mers <- function(mer.data) {
 }
 
 plot.3mers <- function(mer.data) {
-  img.grob <- rasterGrob(mer.data$img, interpolate = TRUE)
-
-  cf <- coord_fixed(xlim = c(0, dim(mer.data$img)[2]), ylim = c(0, dim(mer.data$img)[1]))
-  cf$default <- TRUE
-
-
-  ggplot() +
-    # Draw the input image as a background
-    annotation_custom(img.grob,
-      xmin = 0, xmax = dim(mer.data$img)[2],
-      ymin = 0, ymax = dim(mer.data$img)[1]
-    ) +
-    cf +
+  create.background.image.plot(mer.data) +
 
     # Draw the border polygons
     geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6) +
@@ -158,22 +130,22 @@ plot.3mers <- function(mer.data) {
     # Draw the 3mer
     geom_segment(
       data = mer.data$mer3, aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y),
-      col = "blue", linewidth = 1.5, alpha = 0.8
+      col = "blue", linewidth = 1.5, alpha = 0.8, arrow = arrow(type = "closed", angle = 20, length = unit(3, "mm"))
     ) +
     geom_segment(
       data = mer.data$mer3, aes(x = S2.x, y = S2.y, xend = S3.x, yend = S3.y),
-      col = "orange", linewidth = 0.5
+      col = "orange", linewidth = 0.5, arrow = arrow(type = "closed", angle = 20, length = unit(3, "mm"))
     ) +
     geom_text(
       data = mer.data$mer3, aes(
-        x = (S1.x + S2.x) / 2, y = (S2.y + S1.y) / 2,
-        label = sprintf("%.0f°\n|%.0f°|", mer3.internal.angle, mer3.angle.to.vertical)
+        x = S2.x, y = S2.y,
+        label = sprintf("%.0f°\n\n|%.0f°|", mer3.internal.angle, mer3.angle.to.vertical)
       ),
       col = "red", size = 3
     ) +
-    geom_text(data = mer.data$mer3, aes(x = S1.x, y = S1.y - 10, label = S1), col = "pink1", size = 2) +
-    geom_text(data = mer.data$mer3, aes(x = S2.x, y = S2.y - 10, label = S2), col = "pink1", size = 2) +
-    geom_text(data = mer.data$mer3, aes(x = S3.x, y = S3.y - 10, label = S3), col = "pink1", size = 2) +
+    geom_text(data = mer.data$mer3, aes(x = S1.x, y = S1.y - 15, label = S1), col = "pink1", size = 2) +
+    geom_text(data = mer.data$mer3, aes(x = S2.x, y = S2.y - 15, label = S2), col = "pink1", size = 2) +
+    geom_text(data = mer.data$mer3, aes(x = S3.x, y = S3.y - 15, label = S3), col = "pink1", size = 2) +
     theme_bw() +
     theme(
       axis.title = element_blank(),
@@ -186,21 +158,50 @@ plot.3mers <- function(mer.data) {
     )
 }
 
+plot.graph.2mers <- function(mer.data) {
+  create.background.image.plot(mer.data) +
+
+    # Draw the border polygons
+    geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6) +
+    # Draw the 2mer
+    geom_segment(
+      data = mer.data$contigable.2mers, aes(x = S1.x, y = S1.y, xend = S2.x, yend = S2.y, colour = source),
+      linewidth = 0.5, arrow = arrow(type = "closed", angle = 20, length = unit(3, "mm"))
+    ) +
+    scale_colour_manual(values = c("In 3mer" = "black", "Standalone" = "blue")) +
+
+    # Write the angle of the 2mer
+    geom_text(
+      data = mer.data$contigable.2mers, aes(
+        x = (S2.x + S1.x) / 2, y = (S2.y + S1.y) / 2,
+        label = paste(sprintf("%.1f°\n%.0fpx", angle.of.2mer, length))
+      ),
+      col = "red", size = 3
+    ) +
+
+    # Draw the centroid of each stomata in the 2mer
+    geom_point(data = mer.data$contigable.2mers, aes(x = S1.x, y = S1.y), col = "blue", size = 2) +
+    geom_point(data = mer.data$contigable.2mers, aes(x = S2.x, y = S2.y), col = "orange", size = 1) +
+
+    # Draw the name of each stomata in the 2mer
+    geom_text(data = mer.data$contigable.2mers, aes(x = S1.x, y = S1.y - 15, label = S1), col = "pink1", size = 2) +
+    geom_text(data = mer.data$contigable.2mers, aes(x = S2.x, y = S2.y - 15, label = S2), col = "pink1", size = 2) +
+    theme_bw() +
+    theme(
+      axis.title = element_blank(),
+      axis.text = element_blank(),
+      axis.line = element_blank(),
+      axis.ticks = element_blank(),
+      panel.grid = element_blank(),
+      panel.border = element_blank(),
+      legend.position = "none",
+      plot.margin = margin(t = -20, r = -30, b = -20, l = -30) # remove whitespace outside image
+    )
+}
+
 # plot contig data
 plot.contigs <- function(mer.data) {
-  img.grob <- rasterGrob(mer.data$img, interpolate = TRUE)
-
-  cf <- coord_fixed(xlim = c(0, dim(mer.data$img)[2]), ylim = c(0, dim(mer.data$img)[1]))
-  cf$default <- TRUE
-
-  # visualise the contigs
-  ggplot() +
-    # Draw the input image as a background
-    annotation_custom(img.grob,
-      xmin = 0, xmax = dim(mer.data$img)[2],
-      ymin = 0, ymax = dim(mer.data$img)[1]
-    ) +
-    cf +
+  create.background.image.plot(mer.data) +
 
     # Draw the border polygons
     geom_sf(data = st_multipolygon(mer.data$mer1$polygons), fill = "darkgreen", alpha = 0.6) +
@@ -489,12 +490,14 @@ filter.2mers.by.angle <- function(mer.data, max.angle.delta) {
 filter.2mers.by.intersections <- function(mer.data) {
   # Remove edges in the graph that intersect a third stomata
   # can use sf: https://stackoverflow.com/questions/61703791/determine-lines-that-intersect-a-polygon-in-r
-  # Create line objects
+  # Create line objects and buffer to a rectangle somewhat narrower than a stomata
+  median.stomata.radius <- median(mer.data$mer1$perimeter / (2 * pi)) * 0.4
+
   lines <- lapply(1:nrow(mer.data$mer2), function(i) {
-    sf::st_linestring(rbind(
+    sf::st_buffer(sf::st_linestring(rbind(
       c(mer.data$mer2$S1.x[i], mer.data$mer2$S1.y[i]),
       c(mer.data$mer2$S2.x[i], mer.data$mer2$S2.y[i])
-    ))
+    )), dist = median.stomata.radius)
   })
 
   # Check each 2mer for intersections with a stomata
@@ -741,140 +744,128 @@ filter.3mers.by.terminal <- function(mer.data) {
 #
 # mer.data - the complete data
 create.2mer.graph <- function(mer.data) {
-  # Find the unique 2mers that are present in 3mers. This assumes the 2mers are
+  # Find the 2mers that are present in valid 3mers. This assumes the 2mers are
   # consistently ordered (i.e. we cannot find both s1-s2 and s2-s1 in the data).
-  unique.2mers <- unique(c(mer.data$mer3$merFirst, mer.data$mer3$merLast))
-  if (length(unique.2mers) == 0) {
+  unique.2mers.within.3mers <- data.frame(
+    kmer = unique(c(mer.data$mer3$merFirst, mer.data$mer3$merLast)),
+    source = "In 3mer"
+  )
+
+  if (nrow(unique.2mers.within.3mers) == 0) {
     return(make_empty_graph())
   }
 
   cat(sprintf(
     "Found %i unique 2mers within the remaining %i 3mers\n",
-    length(unique.2mers), nrow(mer.data$mer3)
+    nrow(unique.2mers.within.3mers), nrow(mer.data$mer3)
   ))
 
-  # Find standalone 2mers that are not part of a 3mer but may still be
-  # part of a chain (either a chain of 2 stomata, or 2mers connecting other
-  # chains)
+  # Create a table of 2mers that are valid for inclusion in contigs
+  mer.data$contigable.2mers <- mer.data$mer2 |>
+    dplyr::filter(kmer %in% unique.2mers.within.3mers$kmer)
+
+  # There may still be 2mers remaining that we want to include in the graph.
+  # e.g. standalone 2mers that are not part of a 3mer but still part of a chain.
+  # (a chain of only 2 stomata, or 2mers connecting other chains)
   standalone.2mers <- mer.data$mer2 |>
     dplyr::filter(
-      !(kmer %in% unique.2mers),
-      intersects <= 2
-    ) |>
-    dplyr::filter(angle.is.within.range(
-      angle.of.2mer,
-      mer.data$modal.mer3.angle,
-      ANGLE.DELTA.2MER.STRINGENT
-    )) |>
-    dplyr::distinct()
-
-  valid.2mers <- c(unique.2mers, standalone.2mers$kmer)
-
-  # cat(sprintf(
-  #   "Added %i remaining 2mers within %.2f° of the modal 3mer angle (%.2f°)\n",
-  #   nrow(standalone.2mers), ANGLE.DELTA.2MER.STRINGENT, mer.data$modal.mer3.angle
-  # ))
-
-
-  # There may still be some fully standalone 2mer chains that were excluded by
-  # the stringent angle threshold. We can find these by identifying 2mers at the
-  # valid angle that do not share a stomata with any other chains.
-  chain.2mers <- mer.data$mer2 |>
-    dplyr::filter(
-      # !(kmer %in% valid.2mers),
+      !(kmer %in% mer.data$contigable.2mers$kmer),
       intersects <= 2,
       angle.is.within.range(
         angle.of.2mer,
         mer.data$modal.mer3.angle,
-        ANGLE.DELTA.2MER
+        ANGLE.DELTA.2MER.STRINGENT
       )
-    ) |>
-    dplyr::group_by(S1) |>
-    dplyr::filter(n() == 1) |>
-    dplyr::group_by(S2) |>
-    dplyr::filter(n() == 1)
-  # !(S1 %in% mer.data$mer2$S2),
-  # !(S2 %in% mer.data$mer2$S1)
-  # )
+    )
 
-  valid.2mers <- c(valid.2mers, chain.2mers$kmer)
+  # Of these potential 2mers, some are invalid - for example, they start at a
+  # stomata that is already in a 2mer. Ensure we do not have kmers starting or
+  # ending on the same stomata
+  standalone.2mers <- standalone.2mers |>
+    dplyr::filter(!(S1 %in% mer.data$contigable.2mers$S1)) |>
+    dplyr::filter(!(S2 %in% mer.data$contigable.2mers$S2)) |>
+    # We may have added in 2mers that start or end on the same stomata. Keep
+    # only the shortest 2mers. TODO: replace with angle test
+    dplyr::group_by(S1) |>
+    dplyr::arrange(length) |>
+    dplyr::slice_head(n = 1) |>
+    dplyr::group_by(S2) |>
+    dplyr::arrange(length) |>
+    dplyr::slice_head(n = 1)
+
+  # Add these standalone 2mers to those to be contiged
+  mer.data$contigable.2mers <- rbind(mer.data$contigable.2mers, standalone.2mers)
+
+  # Annotate the reason each 2mer was included for debugging
+  debug.kmer.selection <- unique.2mers.within.3mers
+  if (nrow(standalone.2mers) > 0) {
+    debug.kmer.selection <- rbind(unique.2mers.within.3mers, data.frame(
+      kmer = standalone.2mers$kmer,
+      source = "Standalone"
+    ))
+  }
+
+  mer.data$contigable.2mers <- mer.data$contigable.2mers |>
+    merge(debug.kmer.selection, by = "kmer")
 
   cat(sprintf(
-    "Selected %i 2mers: %i 2mers within valid 3mers, %i 2mers within %.2f° of the modal 3mer angle (%.2f°) and %i standalone 2mers within %.2f° of the modal 3mer angle\n",
-    length(valid.2mers), length(unique.2mers),
+    "Selected %i 2mers: %i 2mers within valid 3mers, %i 2mers within %.2f° of the modal 3mer angle (%.2f°)\n",
+    nrow(mer.data$contigable.2mers), nrow(unique.2mers.within.3mers),
     nrow(standalone.2mers), ANGLE.DELTA.2MER.STRINGENT,
-    mer.data$modal.mer3.angle, nrow(chain.2mers), ANGLE.DELTA.2MER
+    mer.data$modal.mer3.angle
   ))
 
 
-  # We can at this point use the 2mers for graph construction
-  valid.2mers <- c(valid.2mers, chain.2mers$kmer)
+  # We can at this point use the 2mers for graph construction with the stomata
+  # as nodes
   all.1mers <- unique(c(mer.data$mer2$S1, mer.data$mer2$S2))
 
   cat(sprintf(
     "Creating graph from %i stomata connected by %i 2mers\n",
-    length(all.1mers), length(valid.2mers)
+    length(all.1mers), nrow(mer.data$contigable.2mers)
   ))
 
   # Find the vertex id of each 1mer in the graph
-  stomata.index <- function(somtata.id) which(all.1mers == somtata.id)
-  mer.data$mer2$S1.id <- sapply(mer.data$mer2$S1, stomata.index)
-  mer.data$mer2$S2.id <- sapply(mer.data$mer2$S2, stomata.index)
+  stomata.index <- function(stomata.id) which(all.1mers == stomata.id)
+  mer.data$contigable.2mers$S1.id <- sapply(mer.data$contigable.2mers$S1, stomata.index)
+  mer.data$contigable.2mers$S2.id <- sapply(mer.data$contigable.2mers$S2, stomata.index)
 
   # Set stomata as vertices in the network
-  mer2.graph <- igraph::make_empty_graph()
-  mer2.graph <- igraph::add_vertices(mer2.graph, length(all.1mers))
-  igraph::V(mer2.graph)$mer1 <- all.1mers
-
-  mer2.filtered <- mer.data$mer2 |>
-    dplyr::filter(kmer %in% valid.2mers)
-
-  cat(sprintf(
-    "Building edges from %i valid 2mers out of %i total 2mers\n",
-    nrow(mer2.filtered), nrow(mer.data$mer2)
-  ))
+  mer.data$mer2.graph <- igraph::make_empty_graph()
+  mer.data$mer2.graph <- igraph::add_vertices(mer.data$mer2.graph, length(all.1mers))
+  igraph::V(mer.data$mer2.graph)$mer1 <- all.1mers
 
   # Connect by 2mer edges if the 2mer is in the desired subset
-  for (i in 1:nrow(mer2.filtered)) {
-    if (mer2.filtered$kmer[i] %in% valid.2mers) {
-      mer2.graph <- igraph::add_edges(mer2.graph,
-        c(mer2.filtered$S1.id[i], mer2.filtered$S2.id[i]),
-        mer2 = mer2.filtered$kmer[i]
-      )
-    }
+  for (i in 1:nrow(mer.data$contigable.2mers)) {
+    mer.data$mer2.graph <- igraph::add_edges(mer.data$mer2.graph,
+      c(mer.data$contigable.2mers$S1.id[i], mer.data$contigable.2mers$S2.id[i]),
+      mer2 = mer.data$contigable.2mers$kmer[i]
+    )
   }
-  mer2.graph
 
-  ### Original 3mer graph approach below
+  cat(sprintf(
+    "Graph contains %i nodes and %i edges\n",
+    length(V(mer.data$mer2.graph)), length(E(mer.data$mer2.graph))
+  ))
 
-  # # Assign an id to each kmer
-  # k.index <- function(kmer) which(unique.2mers == kmer)
-  # mer.data$merLid <- sapply(mer.data$mer3$merFirst, k.index)
-  # mer.data$merRid <- sapply(mer.data$mer3$merLast, k.index)
-  #
-  # # Make a graph from shared 2mers. The vertices of the graph are the 2mers, and
-  # # the edges are the 3mers they are part of
-  # mer3.graph <- igraph::make_empty_graph()
-  # mer3.graph <- igraph::add_vertices(mer3.graph, length(unique.2mers))
-  # igraph::V(mer3.graph)$kmer <- unique.2mers
-  #
-  # # Link 3mers by 2mer edges
-  # for (i in 1:nrow(mer.data$mer3)) {
-  #   mer3.graph <- mer3.graph + igraph::edges(c(mer.data$mer3$merLid[i], mer.data$mer3$merRid[i]))
-  # }
-  # mer3.graph
+  if (mer.data$write.debug.images) save.plot(plot.graph.2mers(mer.data), mer.data$image.file, ".mer3.6.contigs.png")
+
+  mer.data
 }
 
-
+# Create contigs from stomata connected by valid 2mers
+#
+# mer.data - the complete data
 create.2mer.contigs <- function(mer.data) {
   if (nrow(mer.data$mer2) == 0) {
     return(mer.data$mer2 %>% dplyr::mutate(Contig = list()))
   }
 
-  complete.graph <- create.2mer.graph(mer.data)
+  mer.data <- create.2mer.graph(mer.data)
 
   # Decompose unlinked contigs
-  contig.subgraphs <- igraph::decompose(complete.graph)
+  contig.subgraphs <- igraph::decompose(mer.data$mer2.graph)
+  cat(sprintf("Decomposed graph into %s subgraphs\n", length(contig.subgraphs)))
 
   # Create unique identifier for each contig
   # Get the number of the contig each stomata belongs to
@@ -882,15 +873,16 @@ create.2mer.contigs <- function(mer.data) {
     subgraph <- contig.subgraphs[[i]]
     stomata.id <- vertex_attr(subgraph, "mer1")
     mer2.id <- edge_attr(subgraph, "mer2")
-    data.frame(mer2.id = mer2.id, Contig = rep(i, length(mer2.id)))
+    data.frame(kmer = mer2.id, Contig = rep(i, length(mer2.id)))
   }
 
   # Assign each stomata a contig number
-  contig.numbers <- do.call(rbind, lapply(1:length(contig.subgraphs), assign.contig.number))
+  contig.mer2.map <- do.call(rbind, lapply(1:length(contig.subgraphs), assign.contig.number))
+  cat(sprintf("Decomposed graph into %i contigs\n", length(unique(contig.mer2.map$Contig))))
 
-  mer.data$contigs <- merge(contig.numbers, mer.data$mer2,
-    all.x = TRUE, by.x = "mer2.id", by.y = "kmer"
-  ) %>%
+  mer.data$contigs <- merge(contig.mer2.map, mer.data$contigable.2mers,
+    all.x = TRUE, by = "kmer"
+  ) |>
     dplyr::mutate(
       Image = mer.data$image.file,
       Folder = basename(dirname(Image)),
@@ -1242,14 +1234,8 @@ process.yolo.predictions <- function(yolo.output.file, write.chain.image = FALSE
   data <- filter.3mers.by.branch(data)
   data <- filter.3mers.by.terminal(data)
 
-
-  # Create contigs from the 3mers based on overlapping 2mers
-  # data <- create.contigs(data)
-
+  # Create contigs from the 2mers based on overlapping 3mers
   data <- create.2mer.contigs(data)
-
-
-
   data <- orient.contigs(data)
   #
   # Calculate summary values of contigs
@@ -1268,13 +1254,13 @@ process.yolo.predictions <- function(yolo.output.file, write.chain.image = FALSE
 
   # The entire dataset is too large to save at scale and mostly not needed.
   # Keep the relevant contig information
-  output.data <- list(
-    "contigs" = data$contigs,
-    "measurments" = data$measured.contigs,
-    "metadata" = data$metadata
-  )
+  # output.data <- list(
+  #   "contigs" = data$contigs,
+  #   "measurments" = data$measured.contigs,
+  #   "metadata" = data$metadata
+  # )
 
-  # saveRDS(output.data, rds.output)
+  saveRDS(data, rds.output)
 
   data
 }
@@ -1310,7 +1296,7 @@ input.yolo.files <- list.files(path = "analysis", pattern = "*.tsv", include.dir
 
 
 # Test on just the one
-data <- process.yolo.predictions(input.yolo.files[3], write.chain.image = TRUE, write.debug.images = TRUE)
+data <- process.yolo.predictions(input.yolo.files[15], write.chain.image = TRUE, write.debug.images = TRUE)
 
 #### Run parallel ####
 
