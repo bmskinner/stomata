@@ -1,0 +1,203 @@
+---
+title: "Stomata analysis"
+output: html_document
+date: "2024-03-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(jsonlite)
+library(tidyverse)
+library(magrittr)
+library(LearnGeom)
+library(text.alignment)
+library(igraph)
+library(grid)
+library(patchwork)
+library(OpenImageR)
+library(ggbeeswarm)
+library(filesstrings)
+library(autoimage)
+library(sf)
+library(patchwork)
+library(filesstrings)
+library(rstatix)
+library(rspatial)
+library(raster)
+
+
+chain.distances <- readRDS("chain.distances.Rds") %>%
+  dplyr::rowwise() %>%
+  dplyr::mutate(Folder = basename(Folder),
+                Folder = str_replace(Folder, "- Annotations Done", ""))
+```
+
+
+This is a first pass analysis of the stomata Myo manually annotated, mostly to show some of the things we could measure.
+
+## Chains of stomata in straight lines
+
+The stomata were grouped into straight chains:
+
+```{r}
+knitr::include_graphics("stomatal_image/September 27- 60 samples- Annotations Done/1055-2-1.chains.png")
+```
+For stomata in a chains `S1-S2-S3...`, we can calculate the distances between pairs `S1-S2`, `S2-S3`, etc.
+
+```{r}
+ggplot(chain.distances, aes(x=Folder, y = S1S2))+
+  geom_hline(yintercept = median(chain.distances$S1S2))+
+  geom_violin()+
+  geom_boxplot(width=0.2, alpha=0)+
+  labs(y = "Distance between stomata pairs (pixels)")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+
+
+```{r}
+kruskal.data <- data.frame("Folder" =  chain.distances$Folder, "S1S2" = chain.distances$S1S2)
+kruskal.data.test <- kruskal.test(S1S2 ~ Folder, data  = kruskal.data)
+```
+
+The distances between folders are significantly different (Kruskal-Wallis, p=`r as.character(kruskal.data.test$p.value)`). Post-hoc Dunn's test to show which comparisons are significant break this down as:
+```{r}
+kruskal.data.dunn <- rstatix::dunn_test(kruskal.data, formula = S1S2 ~ Folder, detailed = T)
+knitr::kable(kruskal.data.dunn %>% dplyr::select(group1, group2, p.adj, p.adj.signif), digits = 4,
+             col.names = c("Group 1", "Group 2", "Adjusted p-value", "Significance"))
+```
+
+We can also look at the number of stomata that were not assigned to chains (there are 5 in the image above).
+
+```{r}
+unassigned.stomata <- chain.distances %>%
+  dplyr::ungroup() %>%
+  dplyr::select(Folder, File, fUnassignedStomata) %>%
+  dplyr::distinct()
+ggplot(unassigned.stomata, aes(x=Folder, y=fUnassignedStomata))+
+  geom_hline(yintercept = median(unassigned.stomata$fUnassignedStomata))+
+  geom_violin()+
+  geom_boxplot(width=0.2, alpha=0)+
+  labs(y = "Fraction of stomata in image not in chain")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+```
+```{r}
+kruskal.data <- data.frame("Folder" =  chain.distances$Folder, "Value" = chain.distances$fUnassignedStomata)
+kruskal.data.test <- kruskal.test(Value ~ Folder, data  = kruskal.data)
+```
+Some of the differences will be due to incorrect chaining - this is a work in progress! I assume that this will vary according to where on the leaf the images come from as well. Still, the fraction of unassigned stomata between folders are also significantly different (Kruskal-Wallis, p=`r as.character(kruskal.data.test$p.value)`). Post-hoc Dunn's test to show which comparisons are significant break this down as:
+```{r}
+kruskal.data.dunn <- rstatix::dunn_test(kruskal.data, formula = Value ~ Folder, detailed = T)
+knitr::kable(kruskal.data.dunn %>% dplyr::select(group1, group2, p.adj, p.adj.signif), digits = 4,
+             col.names = c("Group 1", "Group 2", "Adjusted p-value", "Significance"))
+```
+
+
+The next question is how straight are the chains? They could be straight, they could curve to one side, or they could wave back and forth across the image. I'm measuring this by connecting the first and last stomata in an image with a straight line, and measuring the distance of each intermediate stomata from that line.
+
+The figrue below shows the chains from the example image rotated clockwise to horizontal. The blue dots are the stomata locations, showing how some chains curve, and others are very straight.
+
+```{r}
+knitr::include_graphics("stomatal_image/September 27- 60 samples- Annotations Done/1055-2-1.chain.rotated.png")
+```
+By summing the vertical distances between each stomata and the black line, and normalising to the number of stomata in the chain, we can get calculate a mean deviance for each line from perfectly straight. Most of the chains are straight, with some clearly bending up or down.
+
+```{r, warning=FALSE, message=FALSE}
+# Look at deviances in each contig
+deviance.data <- chain.distances %>%
+  dplyr::select(Contig, File, Folder, S1, S2, S1.deviance, S2.deviance) %>%
+  tidyr::pivot_longer(cols = c(S1, S2), names_to = "mer1", values_to = "Stomata")%>%
+  tidyr::pivot_longer(cols = c(S1.deviance, S2.deviance), names_to = "dev_type", values_to = "Deviance") %>%
+  dplyr::filter( (mer1=="S1" & dev_type=="S1.deviance") | (mer1=="S2" & dev_type=="S2.deviance") ) %>%
+  dplyr::select(-mer1, -dev_type) %>%
+  dplyr::distinct() %>%
+  dplyr::group_by(File, Folder, Contig) %>%
+  dplyr::summarise( nStomata = n(),
+                    SumDeviance = sum(Deviance),
+                    SumAbsDeviance = sum(abs(Deviance)),
+                    MeanDeviance = SumDeviance/nStomata,
+                    MeanAbsDeviance = SumAbsDeviance / nStomata,
+                    RootSumSqareDeviance = sqrt( sum(Deviance^2)),
+                    RootMeanSquareDeviance = sqrt( sum(Deviance^2)/nStomata  ),
+                    DevianceRatio = MeanDeviance/MeanAbsDeviance
+  )
+
+# Overall levels of deviance from straight line in contig
+ggplot(deviance.data, aes(x = Folder, y = MeanDeviance))+
+  geom_hline(yintercept = 0)+
+  geom_violin()+
+  geom_boxplot(width = 0.2, alpha = 0)+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
+        legend.position = "none")
+```
+
+This mean measurement might miss some of the chains that oscillate up and down like a sine wave. To check this, we can compare the mean deviance per chain (a mean of positive or negative values) to the absolute mean deviance (a mean of positive values only). Values on the line `y=x` or `y=-x` show consistent bends. Values between these lines are when curves oscillate:
+
+```{r}
+# Mean deviance versus sum of squares - consistency of bends
+ggplot(deviance.data, aes(x = MeanAbsDeviance, y = MeanDeviance))+
+  geom_hex(bins = 100)+
+  # geom_abline(intercept = c(0, 0), slope = 1, col="grey")+
+  # geom_abline(intercept = c(0, 0), slope = -1, col="grey")+
+  # geom_point()+
+  coord_cartesian(xlim=c(0, 30), ylim=c(-30, 30), expand = FALSE)+
+  scale_fill_viridis_c(limits = c(0, 70))+
+  labs(fill = "Number of chains", x = "Mean absolute deviance (pixels)", y = "Mean deviance (pixels)")+
+  facet_wrap(~Folder)+
+  theme_bw()+
+  theme(legend.position = "top")
+```
+
+Most of the bends are consistent, but there are a few oscillations.
+
+
+## Global distribution of stomata
+
+We can also look at the distribution of all the stomata in an image in relation to each other with the G-function:
+
+```{r}
+# for an image, calculate the density of points with a resolution 
+# of 25 pixels ish
+count.freq <- function(image.data){
+  # Create a raster grid covering the image extent
+  image.bounds <- raster(nrows=10, ncols=10, xmn=0, xmx=2592, ymn=0, ymx=1944, vals=0)
+  nc <- rasterize(image.data, image.bounds, fun='count', background=0)
+  nstom <- mask(nc, image.bounds)
+  freq(nstom, useNA='no')
+}
+
+points <- data.frame("x" = chain.distances$S1.x, "y" = chain.distances$S1.y, "File" = chain.distances$File, "Folder" = chain.distances$Folder )
+results <- do.call(rbind, lapply(unique(points$File), function(i) count.freq(as.matrix(points[points$File==i,1:2]))))
+
+
+# The G-function - the cumulative distribution of the distances from events to their nearest neighboring event.
+g.function <- function(image.data, image){
+  # Calculate neighbour distances
+  d <- dist(image.data)
+  dm <- as.matrix(d)
+  diag(dm) <- NA
+  dmin <- apply(dm, 1, min, na.rm=TRUE)
+
+  # get the unique distances (for the x-axis)
+  distance <- sort(unique(round(dmin)))
+  # compute how many cases there with distances smaller that each x
+  Gd <- sapply(distance, function(x) sum(dmin < x))
+  # normalize to get values between 0 and 1
+  Gd <- Gd / length(dmin)
+
+  data.frame(distance, Gd, image)
+}
+
+g.results <- do.call(rbind, lapply(unique(points$File), function(i) g.function(as.matrix(points[points$File==i,1:2]), i)))
+g.results$Folder <- str_replace(basename(dirname(g.results$image)), "- Annotations Done", "")
+
+ggplot(g.results, aes(x=distance, y=Gd, group=image))+
+  geom_line(col="grey")+
+  labs(x = "Distance between stomata", y = "Cumulative fraction")+
+  facet_wrap(~Folder )+
+  theme_bw()
+```
+
+We could do more with this too, but that's for future discussion!

@@ -1,7 +1,7 @@
 # Create chains from point coordinates
 
 #### Imports #####
-source("functions.R")
+source("src/functions.R")
 
 #### Constants #####
 # min and maximum distance between stomata in pixels
@@ -1175,6 +1175,13 @@ measure.contigs <- function(mer.data) {
   # image boundary. Measure the fractional length occupied by the chain. This
   # accounts for how much of the chain we could image depending on the
   # orientation of the leaf.
+
+  # For each contig, st_linestring(start, end)
+  # st_line_interpolate(l1, dists>imagebounds) # extend each line beyond the image
+  # st_line_interpolate(l1, -dists>imagebounds) # in both directions
+  # st_intersect(lines, image bounds) # clip to image bounds
+  # st_length(lines) # find total possible length
+  # calc fraction of total found in contig
 
   mer.data
 }
