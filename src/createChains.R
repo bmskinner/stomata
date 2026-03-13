@@ -227,7 +227,7 @@ plot.contigs <- function(mer.data) {
 plot.rotated.contigs <- function(mer.data) {
   ggplot(mer.data$oriented.contigs) +
     geom_sf(data = mer.data$combined.chain.rectangles, fill = "pink", alpha = 0.6) +
-    geom_sf(data = st_polygon(mer.data$rotated.image.bounds), col = "black", fill = NA) +
+    geom_sf(data = st_polygon(mer.data$oriented.image.bounds), col = "black", fill = NA) +
     geom_sf(data = st_multipolygon(mer.data$rotated.1mers$RotatedPolygon), fill = "darkgreen", alpha = 0.6) +
     geom_segment(
       aes(
@@ -436,7 +436,7 @@ create.2mers <- function(mer.data, min.distance, max.distance) {
     dup.data <- data.frame("angle.of.2mer" = c(result$angle.of.2mer, result$angle.of.2mer + 180))
 
     histo.plot <- ggplot(dup.data, aes(x = angle.of.2mer)) +
-      geom_histogram(aes(y = ..density..), binwidth = 5) +
+      geom_histogram(aes(y = after_stat(density)), binwidth = 5) +
       geom_density() +
       geom_vline(xintercept = mer.data$modal.2mer.angle) +
       geom_vline(xintercept = mer.data$modal.2mer.angle + 180) +
@@ -567,7 +567,7 @@ create.3mers <- function(mer.data) {
 filter.3mers.by.straightness <- function(mer.data, max.angle.delta) {
   if (mer.data$write.debug.images) {
     histo.plot <- ggplot(mer.data$mer3, aes(x = mer3.internal.angle)) +
-      geom_histogram(aes(y = ..density..), binwidth = 5) +
+      geom_histogram(aes(y = after_stat(density)), binwidth = 5) +
       geom_density() +
       scale_x_continuous(breaks = seq(0, 360, 5)) +
       theme_bw()
@@ -608,7 +608,7 @@ filter.3mers.by.straightness <- function(mer.data, max.angle.delta) {
 filter.3mers.by.orientation <- function(mer.data, max.angle.delta) {
   if (mer.data$write.debug.images) {
     histo.plot <- ggplot(mer.data$mer3, aes(x = mer3.angle.to.vertical)) +
-      geom_histogram(aes(y = ..density..), binwidth = 5) +
+      geom_histogram(aes(y = after_stat(density)), binwidth = 5) +
       geom_density() +
       geom_vline(xintercept = mer.data$modal.mer3.angle) +
       labs(title = sprintf("Modal angle %.2f°", mer.data$modal.mer3.angle)) +
@@ -1000,11 +1000,18 @@ orient.contigs <- function(mer.data) {
   # x - an sf object, a matrix of XY coordinates, or an x coordinate
   # y - a y coordinate. If missing, x is assumed to be an sf or matrix
   # degrees - the angle for rotation
-  # Returns: matrix of rotated coordinates
+  # Returns: sf_polygon, sf_point or matrix of rotated coordinates
   rotate.about.image.com <- function(x, y = NULL, degrees) {
     # if we have an st_polygon, we only need the first two columns
     if (any(class(x) == "POLYGON")) {
-      return(list(autoimage::rotate(x[[1]][, 1:2],
+      return(sf::st_polygon(list(autoimage::rotate(x[[1]][, 1:2],
+        -deg2rad(degrees),
+        pivot = c(image.xcom, image.ycom)
+      ))))
+    }
+
+    if (any(class(x) == "POINT")) {
+      return(sf::st_point(autoimage::rotate(x[1, ],
         -deg2rad(degrees),
         pivot = c(image.xcom, image.ycom)
       )))
@@ -1012,16 +1019,13 @@ orient.contigs <- function(mer.data) {
 
     # if we have a point already as a matrix of x and y elements
     if (is.matrix(x)) {
-      return(autoimage::rotate(x,
+      return(sf::st_point(autoimage::rotate(x,
         -deg2rad(degrees),
         pivot = c(image.xcom, image.ycom)
-      ))
+      )))
     }
-
-    autoimage::rotate(matrix(c(x, y), nrow = 1),
-      -deg2rad(degrees),
-      pivot = c(image.xcom, image.ycom)
-    )
+    # # Otherwise create a matrix from x and y coordinates and return as st_point
+    rotate.about.image.com(x = matrix(c(x, y), nrow = 1), degrees = degrees)
   }
 
   # Calculate the orientation of the contigs. This proceeds in two steps; first,
@@ -1048,18 +1052,32 @@ orient.contigs <- function(mer.data) {
     # The contigs are now roughly horizontal.
     # Identify the endpoints of the contig
     dplyr::group_by(Contig) |>
+    # What is the contig orientation? Left-right or right-left?
+    # Find the endpoints of the contig
     dplyr::mutate(
-      Contig.start.index = which.min(RotatedS1[, 1]),
-      Contig.start.x = RotatedS1[Contig.start.index, 1],
-      Contig.start.y = RotatedS1[Contig.start.index, 2],
-      Contig.end.index = which.max(RotatedS2[, 1]),
-      Contig.end.x = RotatedS2[Contig.end.index, 1],
-      Contig.end.y = RotatedS2[Contig.end.index, 2],
+      Contig.left = min(RotatedS1[, 1]) < min(RotatedS2[, 1]),
+      Contig.start.index = ifelse(Contig.left, which.min(RotatedS1[, 1]), which.min(RotatedS2[, 1])),
+      Contig.end.index = ifelse(Contig.left, which.max(RotatedS1[, 1]), which.max(RotatedS2[, 1])),
+      Contig.start.x = ifelse(Contig.left, RotatedS1[Contig.start.index, 1], RotatedS2[Contig.start.index, 1]),
+      Contig.start.y = ifelse(Contig.left, RotatedS1[Contig.start.index, 2], RotatedS2[Contig.start.index, 2]),
+      Contig.end.x = ifelse(Contig.left, RotatedS2[Contig.end.index, 1], RotatedS1[Contig.end.index, 1]),
+      Contig.end.y = ifelse(Contig.left, RotatedS2[Contig.end.index, 2], RotatedS1[Contig.end.index, 2])
     ) |>
+    # Find the endpoints of the contig
+    # dplyr::mutate(
+    #   Contig.start.index = which.min(RotatedS1[, 1]),
+    #   Contig.end.index = which.max(RotatedS2[, 1]),
+    #   Contig.start.x = RotatedS1[Contig.start.index, 1],
+    #   Contig.start.y = RotatedS1[Contig.start.index, 2],
+    #   Contig.end.x = RotatedS2[Contig.end.index, 1],
+    #   Contig.end.y = RotatedS2[Contig.end.index, 2]
+    # ) |>
     # Now find the remaining offset angle for the contigs. Calculate the median
     # across all contigs.
     dplyr::rowwise() |>
     dplyr::mutate(
+      OrientedContigStart = list(sf::st_point(x = c(Contig.start.x, Contig.start.y))),
+      OrientedContigEnd = list(sf::st_point(x = c(Contig.end.x, Contig.end.y))),
       Contig.abs.angle = angle.to.horizontal(
         Contig.start.x, Contig.start.y,
         Contig.end.x, Contig.end.y
@@ -1069,23 +1087,23 @@ orient.contigs <- function(mer.data) {
     dplyr::mutate(contig.median.angle = median(Contig.abs.angle)) |>
     # Adjust the rotation of 2mers again to make the contigs as close to
     # horizontal as possible.
-
     dplyr::rowwise() |>
     dplyr::mutate(
-      # Rotate each 2mer coordinate
-      RotatedS1 = rotate.about.image.com(x = RotatedS1, degrees = contig.median.angle),
-      RotatedS2 = rotate.about.image.com(x = RotatedS2, degrees = contig.median.angle),
+      # Rotate each 2mer coordinate again about the image centre
+      RotatedS1 = rotate.about.image.com(x = RotatedS1[, 1], y = RotatedS1[, 2], degrees = contig.median.angle),
+      RotatedS2 = rotate.about.image.com(x = RotatedS2[, 1], y = RotatedS2[, 2], degrees = contig.median.angle),
 
-      # Rotate the contig about the image centre
-      RotatedContigStart = rotate.about.image.com(Contig.start.x, Contig.start.y, contig.median.angle),
-      RotatedContigEnd = rotate.about.image.com(Contig.end.x, Contig.end.y, contig.median.angle)
-    )
+      # Rotate the contig again about the image centre
+      OrientedContigStart = rotate.about.image.com(x = Contig.start.x, y = Contig.start.y, degrees = contig.median.angle),
+      OrientedContigEnd = rotate.about.image.com(x = Contig.end.x, y = Contig.end.y, degrees = contig.median.angle)
+    ) |>
+    dplyr::select(-(Contig.start.x:Contig.end.y))
 
   # We now know the total rotation needing to be applied to the image
   total.rotation <- mer.data$modal.mer3.angle - 90 + unique(mer.data$oriented.contigs$contig.median.angle)
 
-  # Create the rotated image bounding box
-  mer.data$rotated.image.bounds <- rotate.about.image.com(
+  # Create the oriented image bounding box
+  mer.data$oriented.image.bounds <- rotate.about.image.com(
     x = mer.data$image.bounds,
     degrees = total.rotation
   )
@@ -1095,35 +1113,34 @@ orient.contigs <- function(mer.data) {
   mer.data$rotated.1mers <- mer.data$mer1 |>
     dplyr::rowwise() |>
     dplyr::mutate(
-      coordinates = list(matrix(sf::st_coordinates(polygons)[, 1:2], ncol = 2)),
-      RotatedCoordinates = rotate.about.image.com(
+      OrientedPolygon = list(rotate.about.image.com(
         x = polygons,
         degrees = total.rotation
-      ),
+      )),
 
       # Also note the min and max y position of each rotated polygon. We will use
       # this to establish the shared rectangles covering each chain
-      polygon.min.y = min(RotatedCoordinates[, 2]),
-      polygon.max.y = max(RotatedCoordinates[, 2])
+      polygon.min.y = min(st_coordinates(OrientedPolygon)[, 2]),
+      polygon.max.y = max(st_coordinates(OrientedPolygon)[, 2])
     )
 
-  mer.data$rotated.1mers$RotatedPolygon <- lapply(
-    mer.data$rotated.1mers$RotatedCoordinates,
-    function(x) sf::st_polygon(list(x))
-  )
+  # mer.data$rotated.1mers$OrientedPolygon <- lapply(
+  #   mer.data$rotated.1mers$OrientedCoordinates,
+  #   function(x) sf::st_polygon(list(x))
+  # )
 
 
   # Now create the unioned rectangles along each chain
-  mer.data$rotated.chain.rectangles <- mapply(
+  mer.data$oriented.chain.rectangles <- mapply(
     function(y.min, y.max) {
       sf::st_polygon(list(
         matrix(
           c(
-            min(mer.data$rotated.image.bounds[[1]][, 1]), y.min,
-            max(mer.data$rotated.image.bounds[[1]][, 1]), y.min,
-            max(mer.data$rotated.image.bounds[[1]][, 1]), y.max,
-            min(mer.data$rotated.image.bounds[[1]][, 1]), y.max,
-            min(mer.data$rotated.image.bounds[[1]][, 1]), y.min
+            min(st_coordinates(mer.data$oriented.image.bounds)[, 1]), y.min,
+            max(st_coordinates(mer.data$oriented.image.bounds)[, 1]), y.min,
+            max(st_coordinates(mer.data$oriented.image.bounds)[, 1]), y.max,
+            min(st_coordinates(mer.data$oriented.image.bounds)[, 1]), y.max,
+            min(st_coordinates(mer.data$oriented.image.bounds)[, 1]), y.min
           ),
           ncol = 2, byrow = TRUE
         )
@@ -1135,58 +1152,13 @@ orient.contigs <- function(mer.data) {
   )
 
   # Combine all overlapping chain rectangles
-  mer.data$combined.chain.rectangles <- sf::st_simplify(sf::st_combine(do.call("c", mer.data$rotated.chain.rectangles)))
+  mer.data$combined.chain.rectangles <- sf::st_simplify(sf::st_combine(do.call("c", mer.data$oriented.chain.rectangles)))
 
   # Intersect chain rectangles with the image bounds
-  mer.data$combined.chain.rectangles <- sf::st_intersection(mer.data$combined.chain.rectangles, sf::st_polygon(mer.data$rotated.image.bounds))
+  mer.data$combined.chain.rectangles <- sf::st_intersection(mer.data$combined.chain.rectangles, mer.data$oriented.image.bounds)
 
   mer.data
 }
-
-
-# Calculate straightness, angles and lengths of contigs
-#
-# mer.data - the complete data
-measure.contigs <- function(mer.data) {
-  mer.data$measured.contigs <- mer.data$oriented.contigs |>
-    # Calculate the deviation between the contig line and the individual points
-    dplyr::mutate(
-      S1.deviance = RotatedS1[, 2] - Contig.start.y,
-      S2.deviance = RotatedS2[, 2] - Contig.start.y
-    ) |>
-    # Ensure no duplicate kmers
-    dplyr::select(-mer2id) |>
-    dplyr::distinct()
-
-  # How many stomata are not in a chain?
-  mer.data$stomata.in.contigs <- unique(c(mer.data$contigs$S1, mer.data$contigs$S2))
-  mer.data$stomata.unassigned <- mer.data$mer1$stomata[!(mer.data$mer1$stomata %in% mer.data$stomata.in.contigs)]
-
-  mer.data$nStomata <- length(unique(mer.data$mer1$stomata))
-  mer.data$nUnassignedStomata <- length(unique(mer.data$stomata.unassigned))
-  mer.data$fUnassignedStomata <- length(unique(mer.data$stomata.unassigned)) / mer.data$nStomata
-  mer.data$fAreaOfChainBounds <- sf::st_area(mer.data$combined.chain.rectangles) / sf::st_area(mer.data$image.bounds)
-
-
-  if (mer.data$write.debug.images) save.plot(plot.rotated.contigs(mer.data), mer.data$image.file, ".result.rotated.png")
-
-
-  # TODO - measure brokenness of chains. Project the chain start-end line to the
-  # image boundary. Measure the fractional length occupied by the chain. This
-  # accounts for how much of the chain we could image depending on the
-  # orientation of the leaf.
-
-  # For each contig, st_linestring(start, end)
-  # st_line_interpolate(l1, dists>imagebounds) # extend each line beyond the image
-  # st_line_interpolate(l1, -dists>imagebounds) # in both directions
-  # st_intersect(lines, image bounds) # clip to image bounds
-  # st_length(lines) # find total possible length
-  # calc fraction of total found in contig
-
-  mer.data
-}
-
-
 
 #### Main function #####
 
@@ -1244,36 +1216,23 @@ process.yolo.predictions <- function(yolo.output.file, write.chain.image = FALSE
   # Create contigs from the 2mers based on overlapping 3mers
   data <- create.2mer.contigs(data)
   data <- orient.contigs(data)
-  #
-  # Calculate summary values of contigs
-  data <- measure.contigs(data)
-
-  # Summarise metadata for serialisation
-  data$metadata <- data.frame(
-    Image = data$image.file,
-    File = basename(data$image.file),
-    Folder = basename(dirname(data$image.file)),
-    nStomata = data$nStomata,
-    nUnassignedStomata = data$nUnassignedStomata,
-    fUnassignedStomata = data$fUnassignedStomata,
-    nContigs = length(unique(data$measured.contigs$Contig))
-  )
 
   # The entire dataset is too large to save at scale and mostly not needed.
-  # Keep the relevant contig information
-  # output.data <- list(
-  #   "contigs" = data$contigs,
-  #   "measurments" = data$measured.contigs,
-  #   "metadata" = data$metadata
-  # )
+  # Keep the relevant contig and stomata information
+  output.data <- list(
+    "oriented.contigs" = data$oriented.contigs,
+    "combined.chain.bounds" = data$combined.chain.rectangles,
+    "oriented.image.bounds" = data$oriented.image.bounds,
+    "mer1" = data$mer1
+  )
 
-  saveRDS(data, rds.output)
+  saveRDS(output.data, rds.output)
 
   data
 }
 
 #### Run the analysis ####
-fs::dir_create("analysis")
+# fs::dir_create("analysis")
 
 # (Use the code below if you have single yolo file containing inferencing of multiple images)
 # The complete YOLO output is too large to process in one go - split to a single
@@ -1296,14 +1255,15 @@ fs::dir_create("analysis")
 # split.yolo.output.to.single.image.files("output.txt")
 
 
-# Read the split YOLO files that contain border info for a single image each
+# Read the split YOLO files that contain border info for a single image each.
+# We assume there that the YOLO outputs and raw images are in ./analysis
 # Serialise the detected chains for later use
 # input.yolo.files <- list.files(path = ".", pattern = "*.tsv", include.dirs = TRUE, full.names = TRUE, recursive = FALSE)
 input.yolo.files <- list.files(path = "analysis", pattern = "*.tsv", include.dirs = TRUE, full.names = TRUE, recursive = TRUE)
 
 
-# Test on just the one
-data <- process.yolo.predictions(input.yolo.files[15], write.chain.image = TRUE, write.debug.images = TRUE)
+# Test on just one
+# data <- process.yolo.predictions(input.yolo.files[27], write.chain.image = TRUE, write.debug.images = TRUE)
 
 #### Run parallel ####
 
@@ -1311,5 +1271,5 @@ data <- process.yolo.predictions(input.yolo.files[15], write.chain.image = TRUE,
 # other platforms
 parallelsugar::mclapply(input.yolo.files, process.yolo.predictions,
   mc.cores = 4,
-  write.chain.image = TRUE, write.debug.images = TRUE
+  write.chain.image = TRUE, write.debug.images = FALSE
 )

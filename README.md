@@ -1,21 +1,19 @@
 # Stomata detection via YOLO
 
-This repo has analysis for the maize stomata images.
+This repo has analysis for maize stomata images. 
 
-Images were annotated using AnyLabelling with Segment Anything Model (SAM) to generate segmented outlines as JSON.
+
 
 # Detecting stomata
 
-createYOLOTrainingData.R
-
-- JSON outlines are converted to YOLO format for (a) detection by bounding box and (b) segmentation
-- folder structure for training and validation built
-- images are split to training and validation sets in `./data`
-- python scripts are written for submission onto the cluster GPU nodes to train and predict the detection and segmentation models
-- scripts and images are zipped for upload to the cluster
+- Images were annotated using (X)AnyLabelling with Segment Anything Model (SAM) to generate segmented outlines as JSON.
+- JSON outlines were converted to YOLO format for detection by oriented bounding boxes
+- OBBs from YOLO inferencing were saved to the `./analysis` directory
 
 # Analysing stomatal patterns
 
-- createChains.R to contig stomata in straight lines
-- analyseChains.R to calculate chain measurements
-- process.nma.data.R to analyse NMA outputs from predicted segmented outlines
+We are interested in how the stomata are arranged into files. To do this, we determine which stomata are in 'chains'; straight lines in a consistent orientation within the image.
+
+
+- createChains.R to identify stomata in straight lines and serialise the output to a `.Rds` file in the `./analysis` directory
+- analyseChains.R to calculate chain measurements from the serialised file

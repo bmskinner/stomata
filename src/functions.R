@@ -325,6 +325,60 @@ calculate.stomata.orientation <- function(points) {
   )
 }
 
+
+# Extend the given sf_linestring by the given amount
+#
+# line - the sf_linestring
+# distance - the amount to extend
+# dir - the direction to extend
+extend.linestring <- function(line, distance, dir = "both") {
+  if (!dir %in% c("head", "tail", "both")) {
+    stop("Invalid input 'dir' must either be 'head', 'tail', or 'both'")
+  }
+
+  # convert to WK coords
+  coords <- line
+  # coords <- as.matrix(coords[c("x", "y")])
+
+  # which index to keep
+  to_keep <- dir != c("tail", "head")
+
+  # dir coords index we want to keep
+  dirs <- c(1, nrow(coords))[to_keep]
+
+  # DETERMINE THE DIRECTION OF EACH COORDINATE
+  x_coords <- unname(coords[, 1])
+  y_coords <- unname(coords[, 2])
+
+  # X/Y coordinate pairs
+  x1 <- x_coords[1]
+  y1 <- y_coords[1]
+  x2 <- x_coords[2]
+  y2 <- y_coords[2]
+
+  directions <- c(atan2(y1 - y2, x1 - x2), atan2(y2 - y1, x2 - x1))
+
+  # get directions of the direction of interest
+  directions <- directions[to_keep]
+
+  # if only a single distance, duplicate it, otherwise reverse the first 2 distances
+  distances <- if (length(distance) == 1) {
+    rep(distance, 2)
+  } else {
+    rev(distance[1:2])
+  }
+
+  # adjust dir point coordinates
+  coords[dirs, ] <- coords[dirs, ] + distances[to_keep] * c(cos(directions), sin(directions))
+
+  # # make a new linestring
+  line <- sf::st_linestring(
+    matrix(c(coords[, 1], coords[, 2]), byrow = FALSE, nrow = 2)
+  )
+
+  return(line)
+}
+
 # Find the maximum value in the density plot of the given vector
 find.mode <- function(x) {
   # We are dealing with angles that may wrap around 180-0
