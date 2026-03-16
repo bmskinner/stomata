@@ -17,6 +17,7 @@ library(lwgeom)
 library(parallel)
 library(parallelsugar) # github 'nathanvan/parallelsugar', provides windows mclapply
 library(IRanges)
+library(hexbin)
 
 # Save the given plot to the given path
 save.ggplot <- function(plot, out.file, width = 170, height = 85) {
@@ -590,7 +591,7 @@ read.border.from.yolo <- function(file) {
 
 
 # Calculate the g function for an image
-# image.data - a data.frame with columns for x and y coordinates of the CoM of objects to measure
+# com.data - a data.frame with columns for x and y coordinates of the CoM of objects to measure
 # image the image file
 g.function <- function(com.data, image.file.name) {
   # Calculate neighbour distances

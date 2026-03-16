@@ -224,6 +224,10 @@ plot.contigs <- function(mer.data) {
     )
 }
 
+# Plot chains after rotation to horizontal. Includes bounding boxes of
+# overlapping chains
+#
+# mer.data - the complete data
 plot.rotated.contigs <- function(mer.data) {
   ggplot(mer.data$oriented.contigs) +
     geom_sf(data = mer.data$combined.chain.rectangles, fill = "pink", alpha = 0.6) +
@@ -1156,6 +1160,9 @@ orient.contigs <- function(mer.data) {
 
   # Intersect chain rectangles with the image bounds
   mer.data$combined.chain.rectangles <- sf::st_intersection(mer.data$combined.chain.rectangles, mer.data$oriented.image.bounds)
+
+
+  if (mer.data$write.debug.images) save.plot(plot.rotated.contigs(mer.data), mer.data$image.file, ".result.rotated.png")
 
   mer.data
 }

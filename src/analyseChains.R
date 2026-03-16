@@ -40,7 +40,7 @@ calculate.max.linestring.length <- function(p1, p2, image.bounds) {
 # Calculate straightness, angles and lengths of contigs
 #
 # mer.data - the complete data
-measure.chains <- function(mer.data) {
+measure.chains <- function(mer.data, write.debug.images = FALSE) {
   mer.data$measured.contigs <- mer.data$oriented.contigs |>
     # Calculate the deviation between the contig line and the individual points
     dplyr::mutate(
@@ -89,7 +89,26 @@ measure.chains <- function(mer.data) {
       nChainsInImage = length(unique(mer.data$chain.measurements$Contig))
     )
 
-  # if (mer.data$write.debug.images) save.plot(plot.rotated.contigs(mer.data), mer.data$image.file, ".result.rotated.png")
+  # Calculate deviance data per-chain
+  mer.data$deviance.measurements <- mer.data$measured.contigs %>%
+    dplyr::select(Contig, File, Folder, S1, S2, S1.deviance, S2.deviance) %>%
+    tidyr::pivot_longer(cols = c(S1, S2), names_to = "mer1", values_to = "Stomata") %>%
+    tidyr::pivot_longer(cols = c(S1.deviance, S2.deviance), names_to = "dev_type", values_to = "Deviance") %>%
+    dplyr::filter((mer1 == "S1" & dev_type == "S1.deviance") | (mer1 == "S2" & dev_type == "S2.deviance")) %>%
+    dplyr::select(-mer1, -dev_type) %>%
+    dplyr::distinct() %>%
+    dplyr::group_by(File, Folder, Contig) %>%
+    dplyr::summarise(
+      nStomata = n(),
+      sumDeviance = sum(Deviance), # can centre on zero
+      sumAbsDeviance = sum(abs(Deviance)), # can only increase
+      meanDeviance = sumDeviance / nStomata,
+      meanAbsDeviance = sumAbsDeviance / nStomata,
+      rootSumSqareDeviance = sqrt(sum(Deviance^2)),
+      rootMeanSquareDeviance = sqrt(sum(Deviance^2) / nStomata),
+      devianceRatio = meanDeviance / meanAbsDeviance,
+      .groups = "drop_last"
+    )
 
   mer.data
 }
@@ -112,6 +131,7 @@ input.data <- lapply(input.chain.files, read.chain.data)
 stomata.measurements <- do.call(rbind, lapply(input.data, \(x) x$mer1))
 image.measurements <- do.call(rbind, lapply(input.data, \(x) x$image.measurements))
 chain.measurements <- do.call(rbind, lapply(input.data, \(x) x$chain.measurements))
+deviance.measurements <- do.call(rbind, lapply(input.data, \(x) x$deviance.measurements))
 
 cat(sprintf(
   "%i stomata analysed from %i images, aggregated into %i chains\n",
@@ -221,37 +241,9 @@ save.ggplot(
   "figure/Stomata_area_per_image.png"
 )
 
-#### Detailed analysis ####
-
-# Are the distances significantly different?
-# kruskal.data <- data.frame("Folder" =  chain.measure$Folder, "length" = chain.measure$length)
-# kruskal.test(length ~ Folder, data  = kruskal.data)
-# kruskal.data.dunn <- rstatix::dunn_test(kruskal.data, formula = length ~ Folder, detailed = T)
-
-
-# Look at deviances in each contig
-deviance.data <- chain.measure %>%
-  dplyr::select(Contig, File, Folder, S1, S2, S1.deviance, S2.deviance) %>%
-  tidyr::pivot_longer(cols = c(S1, S2), names_to = "mer1", values_to = "Stomata") %>%
-  tidyr::pivot_longer(cols = c(S1.deviance, S2.deviance), names_to = "dev_type", values_to = "Deviance") %>%
-  dplyr::filter((mer1 == "S1" & dev_type == "S1.deviance") | (mer1 == "S2" & dev_type == "S2.deviance")) %>%
-  dplyr::select(-mer1, -dev_type) %>%
-  dplyr::distinct() %>%
-  dplyr::group_by(File, Folder, Contig) %>%
-  dplyr::summarise(
-    nStomata = n(),
-    SumDeviance = sum(Deviance),
-    SumAbsDeviance = sum(abs(Deviance)),
-    MeanDeviance = SumDeviance / nStomata,
-    MeanAbsDeviance = SumAbsDeviance / nStomata,
-    RootSumSqareDeviance = sqrt(sum(Deviance^2)),
-    RootMeanSquareDeviance = sqrt(sum(Deviance^2) / nStomata),
-    DevianceRatio = MeanDeviance / MeanAbsDeviance
-  )
-
 # Overall levels of deviance from straight line in contig
 save.ggplot(
-  ggplot(deviance.data, aes(x = Folder, y = MeanDeviance)) +
+  ggplot(deviance.measurements, aes(x = Folder, y = meanDeviance)) +
     geom_hline(yintercept = 0) +
     geom_violin() +
     # geom_beeswarm()+
@@ -266,7 +258,7 @@ save.ggplot(
 
 # Mean deviance versus sum of squares - consistency of bends
 save.ggplot(
-  ggplot(deviance.data, aes(x = MeanAbsDeviance, y = MeanDeviance)) +
+  ggplot(deviance.measurements, aes(x = meanAbsDeviance, y = meanDeviance)) +
     geom_hex(bins = 100) +
     geom_abline(intercept = c(0, 0), slope = 1, col = "grey") + # Consistent bend
     geom_abline(intercept = c(0, 0), slope = -1, col = "grey") + # Consistent bend
@@ -282,19 +274,38 @@ save.ggplot(
   "figure/Deviance_consistency.png"
 )
 
-#### G-function analysis ####
+#### TODO: further analysis ####
 
-# Run the g-function on each image
-# Get the CoMs of each stomata
-coms <- chain.contigs %>% dplyr::select(S = S1, x = S1.x, y = S1.y, Image, Folder, File)
-coms <- rbind(coms, chain.contigs %>% dplyr::select(S = S2, x = S2.x, y = S2.y, Image, Folder, File))
-coms %<>% dplyr::distinct()
 
-g.results <- do.call(rbind, lapply(unique(coms$Image), function(i) g.function(as.matrix(coms[coms$Image == i, c("x", "y")]), i)))
+# Are values significantly different between groups of images?
+# Using folder here - create and use whatever grouping column is needed
+# Testing the chain length. Other parameters can be tested similarly
+# kruskal.data <- data.frame("Folder" =  chain.measurements$Folder, "chainLengthFraction" = chain.measurements$chainLengthFraction)
+# kruskal.test(chainLengthFraction ~ Folder, data  = kruskal.data)
+# kruskal.data.dunn <- rstatix::dunn_test(kruskal.data, formula = chainLengthFraction ~ Folder, detailed = T)
+
+
+# Run the g-function on the stomata CoMs from each image
+# Aggregate results to a single data.frame
+g.results <- do.call(
+  rbind,
+  lapply(
+    unique(stomata.measurements$Image),
+    function(i) {
+      g.function(
+        as.matrix(stomata.measurements[
+          stomata.measurements$Image == i,
+          c("x.com", "y.com")
+        ]),
+        i
+      )
+    }
+  )
+)
 
 g.results$Folder <- basename(dirname(g.results$Image))
 
-# Plot the per-file plots
+# Plot the per-image plots
 save.ggplot(
   ggplot(g.results, aes(x = distance, y = Gd, group = Image)) +
     geom_line(data = g.results[, c("distance", "Gd", "Image")], col = "grey", alpha = 0.1) +
@@ -306,14 +317,14 @@ save.ggplot(
   height = 170
 )
 
-# What is the mean value for each folder?
-# Linear interpolation of per-file curve to consistent spacing
-
+# What is the mean value for each folder? Use a linear interpolation of per-file
+# curve to consistent spacing in 10-pixel windows
 windows <- as.data.frame(IRanges(
   start = seq(40, 400, by = 10), # vector of window start positions
   end = seq(50, 410, by = 10)
 ))
 
+# Calculate the mean value across images within a given window
 calc.mean <- function(start, end) {
   do.call(rbind, lapply(unique(g.results$Folder), function(folder) {
     subset.data <- g.results[g.results$Folder == folder & g.results$distance > start & g.results$distance <= end, ]
@@ -321,8 +332,10 @@ calc.mean <- function(start, end) {
   }))
 }
 
+# Summarise the mean g-function values
 g.summary <- do.call(rbind, mapply(calc.mean, windows$start, windows$end, SIMPLIFY = FALSE))
 
+# Draw the plot with the mean added.
 save.ggplot(
   ggplot(g.summary, aes(x = distance, y = Gd)) +
     geom_line(data = g.results[, c("distance", "Gd", "Image")], aes(group = Image), col = "grey", alpha = 0.1) +
@@ -332,15 +345,5 @@ save.ggplot(
     facet_wrap(~Folder) +
     theme_bw(),
   "figure/G-function_complete.png",
-  height = 170
-)
-
-save.ggplot(
-  ggplot(g.summary, aes(x = distance, y = Gd, col = Folder)) +
-    geom_line() +
-    labs(x = "Distance between stomata", y = "Cumulative fraction") +
-    theme_bw() +
-    theme(legend.position = "top"),
-  "figure/G-function_summary.png",
   height = 170
 )
