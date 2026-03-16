@@ -336,6 +336,7 @@ filter.1mers.for.overlaps <- function(mer.data, min.distance) {
         has.overlap = sf::st_overlaps(polygons.x, polygons.y),
         toRemove = ifelse(area.x < area.y, s1, s2)
       ) |>
+      dplyr::filter(!is_empty(has.overlap)) |> # may be close but non-overlapping
       dplyr::filter(has.overlap == 1) |>
       dplyr::arrange(toRemove)
 
