@@ -110,6 +110,49 @@ measure.chains <- function(mer.data, write.debug.images = FALSE) {
       .groups = "drop_last"
     )
 
+  # Calculate vertical distance between oriented chains - relates to bundles of
+  # stomata vs veins. The bundles are the minimal bounding boxes encompassing
+  # all the chains in an image. Chains that are close together will have
+  # overlapping bounds.
+  mer.data$inter.bundle.measurements <- do.call(rbind, lapply(mer.data$combined.chain.bounds[[1]], \(x) tibble(
+    bundle.min.y = min(x[[1]][, 2]),
+    bundle.max.y = max(x[[1]][, 2])
+  ))) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(
+      Folder = unique(mer.data$chain.measurements$Folder),
+      File = unique(mer.data$chain.measurements$File),
+      bundleId = row_number(),
+      nBundlesInImage = n(),
+      interBundleDistance = bundle.min.y - dplyr::lag(bundle.max.y, n = 1, order_by = bundle.min.y)
+    )
+
+  # We also want to know the distance between chains within each bundle. Map the
+  # chain to bundle based on oriented y coordinates. Calculate the distance
+  # between all chains within a bundle - not to any chains outside that bundle
+  mer.data$intra.bundle.measurements <- mer.data$oriented.contigs |>
+    dplyr::select(Contig, OrientedContigStart, OrientedContigEnd) |>
+    dplyr::group_by(Contig) |>
+    dplyr::summarise(
+      Folder = unique(mer.data$chain.measurements$Folder),
+      File = unique(mer.data$chain.measurements$File),
+      chain.y.min = min(OrientedContigStart[, 2], OrientedContigEnd[, 2]),
+      chain.y.max = max(OrientedContigStart[, 2], OrientedContigEnd[, 2]),
+      chainYMid = (chain.y.min + chain.y.max) / 2,
+      bundleId = mer.data$inter.bundle.measurements$bundleId[
+        mer.data$inter.bundle.measurements$bundle.min.y <= chainYMid &
+          mer.data$inter.bundle.measurements$bundle.max.y >= chainYMid
+      ]
+    ) |>
+    dplyr::select(-chain.y.min, -chain.y.max) |>
+    dplyr::group_by(bundleId) |>
+    dplyr::mutate(
+      nChainsInBundle = n(),
+      interChainDistance = chainYMid - dplyr::lag(chainYMid, n = 1, order_by = chainYMid)
+    ) |>
+    na.omit() |>
+    dplyr::arrange(bundleId, chainYMid)
+
   mer.data
 }
 
@@ -132,7 +175,8 @@ stomata.measurements <- do.call(rbind, lapply(input.data, \(x) x$mer1))
 image.measurements <- do.call(rbind, lapply(input.data, \(x) x$image.measurements))
 chain.measurements <- do.call(rbind, lapply(input.data, \(x) x$chain.measurements))
 deviance.measurements <- do.call(rbind, lapply(input.data, \(x) x$deviance.measurements))
-
+inter.bundle.measurements <- do.call(rbind, lapply(input.data, \(x) x$inter.bundle.measurements))
+intra.bundle.measurements <- do.call(rbind, lapply(input.data, \(x) x$intra.bundle.measurements))
 cat(sprintf(
   "%i stomata analysed from %i images, aggregated into %i chains\n",
   sum(image.measurements$nStomataInImage), nrow(image.measurements), sum(image.measurements$nChainsInImage)
@@ -227,6 +271,30 @@ save.ggplot(
   "figure/Stomata_per_chain.png"
 )
 
+# Distance between bundles of chains
+save.ggplot(
+  ggplot(inter.bundle.measurements, aes(x = Folder, y = interBundleDistance)) +
+    geom_hline(yintercept = median(inter.bundle.measurements$interBundleDistance)) +
+    geom_violin() +
+    geom_boxplot(width = 0.2, alpha = 0) +
+    labs(y = "Distance between bundles of chains") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)),
+  "figure/Inter-bundle_distance.png"
+)
+
+# Distance between chains within bundles
+save.ggplot(
+  ggplot(intra.bundle.measurements, aes(x = Folder, y = interChainDistance)) +
+    geom_hline(yintercept = median(intra.bundle.measurements$interChainDistance)) +
+    geom_violin() +
+    geom_boxplot(width = 0.2, alpha = 0) +
+    labs(y = "Distance between chains within a bundle") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)),
+  "figure/Inter-chain_distance_per_bundle.png"
+)
+
 #### Summary at stomata level ####
 
 # Area of stomata
@@ -273,6 +341,8 @@ save.ggplot(
     theme(legend.position = "top"),
   "figure/Deviance_consistency.png"
 )
+
+
 
 #### TODO: further analysis ####
 
